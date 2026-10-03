@@ -1,0 +1,3 @@
+build/
+*.cf32
+__pycache__/
