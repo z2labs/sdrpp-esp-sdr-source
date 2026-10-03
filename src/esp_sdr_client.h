@@ -42,9 +42,12 @@ struct Settings {
     int specRate = 0;                // 0: IQ stream; 16/40/80e6: on-chip spectrum (SPEC, display only)
     int bins = 256;                  // SPEC FFT size: 256, 1024, 2048
     bool maxHold = false;            // SPEC detector: mean (false) or max hold
+    bool specDcFix = true;           // SPEC: per-FFT DC removal on the chip (DC 0) + centre bin filled
+    std::string extra;               // diagnostics: ';'-separated commands sent before each stream start
     bool operator!=(const Settings& o) const {
         return freqHz != o.freqHz || gain != o.gain || rate != o.rate || ppm != o.ppm ||
-               specRate != o.specRate || bins != o.bins || maxHold != o.maxHold;
+               specRate != o.specRate || bins != o.bins || maxHold != o.maxHold || specDcFix != o.specDcFix ||
+               extra != o.extra;
     }
 };
 
@@ -65,7 +68,8 @@ public:
     bool start(const std::string& port, const Settings& s, SampleCallback cb, std::string& error,
                SpectrumCallback scb = nullptr);
     void stop();
-    void update(const Settings& s);   // applied by the worker thread (stream restart)
+    uint64_t update(const Settings& s);   // applied by the worker thread (stream restart); returns a sequence number
+    bool applied(uint64_t seq) const { return appliedSeq >= seq; }   // stream restarted with those settings
     bool running() const { return run; }
     Stats stats;
     std::string lastTune() { std::lock_guard<std::mutex> l(mtx); return tuneInfo; }
@@ -96,11 +100,14 @@ private:
     std::mutex mtx;
     Settings want, cur;
     bool dirty = true, streaming = false, fresh = true;
+    uint64_t wantSeq = 0;
+    std::atomic<uint64_t> appliedSeq{0};
     std::string tuneInfo;
     std::vector<uint8_t> buf;
     std::vector<float> out;
     uint64_t nextIdx = 0; bool haveNext = false;
     double dcI = 0, dcQ = 0;
+    double ncoPh = 0, ncoStep = 0;   // fine tuning below the S3's 1 kHz LO step
 };
 
 uint32_t crc32(const uint8_t* p, size_t n);

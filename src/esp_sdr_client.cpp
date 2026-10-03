@@ -3,6 +3,8 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+
+static constexpr double kTwoPi = 6.283185307179586;
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -148,7 +150,7 @@ bool Client::start(const std::string& name, const Settings& s, SampleCallback ca
     scb = scallback;
     {
         std::lock_guard<std::mutex> l(mtx);
-        want = s; dirty = true;
+        want = s; dirty = true; wantSeq++;
     }
     streaming = false;
     run = true;
@@ -163,14 +165,16 @@ void Client::stop() {
     }
     if (port.isOpen()) {
         if (streaming) stopStream();
+        if (cur.specRate) { command("BANDWIDTH 20", "OK", 800); command("DC 1", "", 800); }
         port.close();
     }
     streaming = false;
 }
 
-void Client::update(const Settings& s) {
+uint64_t Client::update(const Settings& s) {
     std::lock_guard<std::mutex> l(mtx);
-    if (s != want) { want = s; dirty = true; }
+    if (s != want) { want = s; dirty = true; wantSeq++; }
+    return wantSeq;
 }
 
 bool Client::command(const std::string& c, const char* expect, int timeoutMs) {
@@ -236,6 +240,12 @@ bool Client::specProfile(int rate, int bins, int& code, int& stride, int& upf) {
 void Client::startStream(const Settings& s) {
     int64_t fk = (int64_t)std::llround(double(s.freqHz) * (1.0 - s.ppm * 1e-6) / 1e3);
     fk = std::max<int64_t>(FMIN / 1000, std::min<int64_t>(FMAX / 1000, fk));
+    for (size_t a = 0; a < s.extra.size();) {
+        size_t e = s.extra.find(';', a);
+        if (e == std::string::npos) e = s.extra.size();
+        if (e > a) command(s.extra.substr(a, e - a), "", 1500);
+        a = e + 1;
+    }
     if (s.specRate) {
         // On-chip spectrum: LO at the centre, analog filter open at 40/80 MS/s (its default
         // 20 MHz would only show filtered noise at the edges), ~50 spectra/s to the host
@@ -247,6 +257,9 @@ void Client::startStream(const Settings& s) {
         command("FOFS " + std::to_string(fk % 1000), "OK", 1500);
         command("GAIN MANUAL " + std::to_string(s.gain), "OK", 1500);
         command(std::string("BANDWIDTH ") + (s.specRate > 16000000 ? "0" : "20"), "OK", 1500);
+        // DC 0: the chip removes the DC bin of every FFT (the default averaged estimate leaves the
+        // centre 8-20 dB high because the LO leakage changes from FFT to FFT); old firmware: ERR, ignored
+        command(s.specDcFix ? "DC 0" : "DC 1", "", 800);
         port.write("SPEC 0 " + std::to_string(stride) + " " + std::to_string(upf) + " " + (s.maxHold ? "1" : "0") + " " +
                    std::to_string(code) + " " + std::to_string(s.bins) + "\n");
         {
@@ -261,11 +274,19 @@ void Client::startStream(const Settings& s) {
         stats.retunes++;
         return;
     }
-    if (cur.specRate) command("BANDWIDTH 20", "OK", 1500);   // back to the default filter for IQ
+    if (cur.specRate) {   // back to the firmware defaults the web viewer expects
+        command("BANDWIDTH 20", "OK", 1500);
+        command("DC 1", "", 800);
+    }
     // LO fs/4 (4 MHz) below the wanted frequency; the chip shifts by +fs/4 before the FIR
     // (IQS mode 2), so LO leakage and the 1/f hump at 0 Hz IF stay outside the output band
     int64_t lo = fk - 4000;
     int mhz = (int)(lo / 1000), khz = (int)(lo % 1000);
+    // The LO can only be set in 1 kHz steps: shift the residual out digitally (signals appear
+    // 'resid' Hz too high when the LO sits below the wanted one)
+    double resid = double(s.freqHz) * (1.0 - s.ppm * 1e-6) - 4e6 - double(lo) * 1e3;
+    ncoStep = std::fabs(resid) < 1000 ? -kTwoPi * resid / s.rate : 0;
+    ncoPh = 0;
     int bits = linkBits(s.rate), dec = decimation(s.rate);
     int sh = bits == 8 ? outShift(s.gain) : 0;
     command("FREQ " + std::to_string(mhz), "OK", 1500);
@@ -286,14 +307,15 @@ void Client::startStream(const Settings& s) {
 void Client::worker() {
     uint8_t b[65536];
     while (run) {
-        bool apply = false; Settings s;
+        bool apply = false; Settings s; uint64_t seq = 0;
         {
             std::lock_guard<std::mutex> l(mtx);
-            if (dirty) { s = want; dirty = false; apply = true; }
+            if (dirty) { s = want; seq = wantSeq; dirty = false; apply = true; }
         }
         if (apply) {
             if (streaming) stopStream();
             startStream(s);
+            appliedSeq = seq;
         }
         int n = port.read(b, sizeof(b));
         if (n < 0) { run = false; break; }   // device unplugged
@@ -336,6 +358,10 @@ void Client::parseSpec() {
             uint8_t v = c[(n / 2 - j + n) % n];
             spec[j] = v ? v / step - 84.3f : -140.0f;
         }
+        if (cur.specDcFix) {   // DC removed per FFT on the chip: fill the empty centre bin from its neighbours
+            double a = std::pow(10.0, spec[n / 2 - 1] / 10.0), b = std::pow(10.0, spec[n / 2 + 1] / 10.0);
+            spec[n / 2] = (float)(10.0 * std::log10(0.5 * (a + b)));
+        }
         if (scb) scb(spec.data(), n, specFs);
     }
     if (pos) buf.erase(buf.begin(), buf.begin() + std::min(pos, buf.size()));
@@ -364,7 +390,10 @@ void Client::parse() {
             if (fr != 0 || dec != decimation(cur.rate)) continue;
             fresh = false;
         }
-        if (haveNext && sidx != nextIdx) { stats.gaps++; stats.lost += sidx - nextIdx; }
+        if (haveNext && sidx != nextIdx) {
+            stats.gaps++; stats.lost += sidx - nextIdx;
+            ncoPh = std::fmod(ncoPh + ncoStep * double(sidx - nextIdx), kTwoPi);   // keep the NCO on the sample clock
+        }
         nextIdx = sidx + ns; haveNext = true;
         stats.frames++; stats.samples += ns;
         // FIR units (10-bit sample * 32, int16 full scale) -> +-1.0
@@ -382,6 +411,15 @@ void Client::parse() {
         for (int j = 0; j < ns; j++) {
             out[2 * j] -= (float)dcI;
             out[2 * j + 1] = -(out[2 * j + 1] - (float)dcQ);   // S3: RF above LO is negative -> conjugate
+        }
+        if (ncoStep != 0) {   // remove the sub-kHz tuning residual (the S3 tunes in 1 kHz steps)
+            for (int j = 0; j < ns; j++) {
+                float c = (float)std::cos(ncoPh), s = (float)std::sin(ncoPh);
+                float a = out[2 * j], b = out[2 * j + 1];
+                out[2 * j] = a * c - b * s; out[2 * j + 1] = a * s + b * c;
+                ncoPh += ncoStep;
+            }
+            ncoPh = std::fmod(ncoPh, kTwoPi);
         }
         if (cb) cb(out.data(), ns);
     }
