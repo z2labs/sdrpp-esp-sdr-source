@@ -5,11 +5,11 @@
 #include <cstring>
 
 static constexpr double kTwoPi = 6.283185307179586;
-#ifdef _WIN32
+#if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
-#else
+#elif !defined(__ANDROID__)
 #include <fcntl.h>
 #include <glob.h>
 #include <termios.h>
@@ -81,6 +81,8 @@ std::vector<std::string> SerialPort::list() {
     }
     return r;
 }
+#elif defined(__ANDROID__)
+// see serial_android.cpp
 #else
 bool SerialPort::open(const std::string& name, std::string& error) {
     close();

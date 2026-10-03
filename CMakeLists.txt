@@ -51,6 +51,13 @@ endif ()
 
 target_include_directories(esp_sdr_source PRIVATE "src/")
 
+# Android: no /dev/ttyACM for apps, the serial port is CDC-ACM over libusb on the USB fd
+# (src/serial_android.cpp); libusb comes from the android-sdr-kit used by the SDR++ Android build
+if (ANDROID)
+    target_include_directories(esp_sdr_source PRIVATE /sdr-kit/${ANDROID_ABI}/include/libusb-1.0 /sdr-kit/${ANDROID_ABI}/include)
+    target_link_libraries(esp_sdr_source PRIVATE /sdr-kit/${ANDROID_ABI}/lib/libusb1.0.so)
+endif ()
+
 # Wideband (on-chip spectrum) mode needs IQFrontEnd::setExternalFFTInput in the SDR++ core
 # (docs/wideband-spectrum.md). AUTO: use it if the core headers have it. Build with OFF for
 # SDR++ releases without it, otherwise the module would not load there.
@@ -77,7 +84,7 @@ message(STATUS "esp_sdr_source: wideband spectrum mode ${_have_fft}")
 
 # Stand-alone CLI check of the device client (no SDR++ needed at run time)
 option(ESP_SDR_BUILD_TEST "Build the esp_sdr_test command-line tool" ON)
-if (ESP_SDR_BUILD_TEST)
+if (ESP_SDR_BUILD_TEST AND NOT ANDROID)
     add_executable(esp_sdr_test tools/esp_sdr_test.cpp src/esp_sdr_client.cpp)
     target_include_directories(esp_sdr_test PRIVATE "src/")
     if (NOT MSVC)

@@ -18,17 +18,23 @@ namespace espsdr {
 class SerialPort {
 public:
     ~SerialPort();
-    bool open(const std::string& name, std::string& error);
+    bool open(const std::string& name, std::string& error);   // Android: name = "fd:<n>" (USB device fd)
     void close();
     bool isOpen() const;
     int read(uint8_t* buf, int len);   // waits at most ~50 ms; <0 on error
     bool write(const std::string& s);
     void flushInput();
     static std::vector<std::string> list();
+#ifdef __ANDROID__
+    // Android has no /dev/ttyACM for apps: CDC-ACM over libusb on the fd the USB permission gave us
+    struct Usb;
+#endif
 
 private:
-#ifdef _WIN32
+#if defined(_WIN32)
     void* h = nullptr;
+#elif defined(__ANDROID__)
+    Usb* usb = nullptr;
 #else
     int fd = -1;
 #endif

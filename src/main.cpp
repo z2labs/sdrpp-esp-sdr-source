@@ -12,6 +12,11 @@
 #include <gui/style.h>
 #include <config.h>
 #include <cstring>
+#ifdef __ANDROID__
+#include <android_backend.h>
+// ESP32-S3 USB Serial/JTAG; the app asks for USB permission at start-up, the fd comes from the backend
+static const std::vector<backend::DevVIDPID> ESP_VIDPIDS = {{0x303A, 0x1001}};
+#endif
 
 #define CONCAT(a, b) ((std::string(a) + b).c_str())
 
@@ -135,7 +140,23 @@ private:
             };
         }
 #endif
-        bool ok = _this->client.start(_this->port, _this->settings(), [_this](const float* iq, int n) {
+        std::string openName = _this->port;
+#ifdef __ANDROID__
+        {
+            int vid = 0, pid = 0;
+            int fd = backend::getDeviceFD(vid, pid, ESP_VIDPIDS);
+            if (fd < 0) {
+#ifdef ESP_SDR_HAVE_EXTERNAL_FFT
+                sigpath::iqFrontEnd.setExternalFFTInput(false);
+#endif
+                _this->error = "connect the ESP32-S3 via USB OTG and allow USB access";
+                flog::error("ESP-SDR: {}", _this->error);
+                return;
+            }
+            openName = "fd:" + std::to_string(fd);
+        }
+#endif
+        bool ok = _this->client.start(openName, _this->settings(), [_this](const float* iq, int n) {
             memcpy(_this->stream.writeBuf, iq, sizeof(float) * 2 * n);
             _this->stream.swap(n);
         }, err, scb);
