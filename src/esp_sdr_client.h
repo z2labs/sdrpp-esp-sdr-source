@@ -39,8 +39,12 @@ struct Settings {
     int gain = 60;                   // S3 gain index 0..82
     int rate = 250000;               // 250000, 125000 or 62500
     double ppm = 0.0;                // crystal correction, positive = board reads high
+    int specRate = 0;                // 0: IQ stream; 16/40/80e6: on-chip spectrum (SPEC, display only)
+    int bins = 256;                  // SPEC FFT size: 256, 1024, 2048
+    bool maxHold = false;            // SPEC detector: mean (false) or max hold
     bool operator!=(const Settings& o) const {
-        return freqHz != o.freqHz || gain != o.gain || rate != o.rate || ppm != o.ppm;
+        return freqHz != o.freqHz || gain != o.gain || rate != o.rate || ppm != o.ppm ||
+               specRate != o.specRate || bins != o.bins || maxHold != o.maxHold;
     }
 };
 
@@ -51,12 +55,15 @@ struct Stats {
 // Samples are delivered as interleaved float I/Q, full scale +-1.0 (int16 FIR units / 32768),
 // residual DC removed and the spectrum oriented like any other SDR (RF above LO = positive).
 using SampleCallback = std::function<void(const float* iq, int count)>;
+// One spectrum in dBFS, low to high frequency, span = sample rate, centred on the tuned frequency.
+using SpectrumCallback = std::function<void(const float* db, int bins, int sampleRate)>;
 
 class Client {
 public:
     Client();
     ~Client();
-    bool start(const std::string& port, const Settings& s, SampleCallback cb, std::string& error);
+    bool start(const std::string& port, const Settings& s, SampleCallback cb, std::string& error,
+               SpectrumCallback scb = nullptr);
     void stop();
     void update(const Settings& s);   // applied by the worker thread (stream restart)
     bool running() const { return run; }
@@ -74,9 +81,16 @@ private:
     void stopStream();
     void startStream(const Settings& s);
     void parse();
+    void parseSpec();
+    bool specProfile(int rate, int bins, int& code, int& stride, int& upf);
 
     SerialPort port;
     SampleCallback cb;
+    SpectrumCallback scb;
+    std::string specInfo;            // SPECINFO? reply (profiles), empty if not supported
+    std::string reply;               // last line matched by command()
+    std::vector<float> spec;
+    int specFs = 0, specBins = 0;
     std::thread thr;
     std::atomic<bool> run{false};
     std::mutex mtx;

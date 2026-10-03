@@ -7,6 +7,9 @@
 #include <cstdlib>
 #include <string>
 #include <thread>
+#include <vector>
+#include <algorithm>
+#include <cmath>
 
 int main(int argc, char** argv) {
     if (argc < 2) {
@@ -22,13 +25,23 @@ int main(int argc, char** argv) {
     double secs = argc > 5 ? atof(argv[5]) : 5;
     FILE* f = (argc > 6 && std::string(argv[6]) != "-") ? fopen(argv[6], "wb") : nullptr;
     bool hop = argc > 7 && atoi(argv[7]);
+    // rate 16000000 / 40000000 / 80000000: on-chip spectrum (SPEC) instead of IQ; bins from argv[8]
+    if (s.rate >= 1000000) { s.specRate = s.rate; s.rate = 250000; s.bins = argc > 8 ? atoi(argv[8]) : 256; }
     espsdr::Client c;
     uint64_t got = 0;
     std::string err;
+    float peakDb = -999, peakHz = 0, floorDb = 0;
     if (!c.start(argv[1], s, [&](const float* iq, int n) {
             got += n;
             if (f) fwrite(iq, sizeof(float), 2 * n, f);
-        }, err)) {
+        }, err, [&](const float* db, int n, int fs) {
+            got++;
+            int k = 0;
+            for (int j = 1; j < n; j++) if (db[j] > db[k] && std::abs(j - n / 2) > 2) k = j;
+            std::vector<float> sorted(db, db + n); std::nth_element(sorted.begin(), sorted.begin() + n / 2, sorted.end());
+            peakDb = db[k]; peakHz = (k - n / 2) * float(fs) / n; floorDb = sorted[n / 2];
+            if (f) fwrite(db, sizeof(float), n, f);
+        })) {
         printf("ERROR %s\n", err.c_str());
         return 2;
     }
@@ -40,6 +53,8 @@ int main(int argc, char** argv) {
         printf("t=%2d s  %7.1f kS/s  frames %llu  crc %llu  gaps %llu  lost %llu  [%s]\n", ++k, (now - last) / 1e3,
                (unsigned long long)c.stats.frames.load(), (unsigned long long)c.stats.crcErrors.load(),
                (unsigned long long)c.stats.gaps.load(), (unsigned long long)c.stats.lost.load(), c.lastTune().c_str());
+        if (s.specRate) printf("        spectra %llu  peak %+.3f MHz %.1f dBFS  median %.1f dBFS\n", (unsigned long long)got,
+                               peakHz / 1e6, peakDb, floorDb);
         fflush(stdout);
         last = now;
         if (hop) { espsdr::Settings h = s; h.freqHz += (k % 2) * 7000000ull; c.update(h); }

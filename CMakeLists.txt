@@ -51,6 +51,30 @@ endif ()
 
 target_include_directories(esp_sdr_source PRIVATE "src/")
 
+# Wideband (on-chip spectrum) mode needs IQFrontEnd::setExternalFFTInput in the SDR++ core
+# (docs/wideband-spectrum.md). AUTO: use it if the core headers have it. Build with OFF for
+# SDR++ releases without it, otherwise the module would not load there.
+set(ESP_SDR_EXTERNAL_FFT "AUTO" CACHE STRING "Wideband spectrum mode: AUTO, ON or OFF")
+if (TARGET sdrpp_core AND NOT SDRPP_SOURCE_DIR)
+    set(_core_root "${CMAKE_SOURCE_DIR}/core")
+else ()
+    set(_core_root "${SDRPP_SOURCE_DIR}/core")
+endif ()
+set(_have_fft OFF)
+if (ESP_SDR_EXTERNAL_FFT STREQUAL "ON")
+    set(_have_fft ON)
+elseif (ESP_SDR_EXTERNAL_FFT STREQUAL "AUTO" AND EXISTS "${_core_root}/src/signal_path/iq_frontend.h")
+    file(READ "${_core_root}/src/signal_path/iq_frontend.h" _iqfe)
+    string(FIND "${_iqfe}" "setExternalFFTInput" _pos)
+    if (NOT _pos EQUAL -1)
+        set(_have_fft ON)
+    endif ()
+endif ()
+if (_have_fft)
+    target_compile_definitions(esp_sdr_source PRIVATE ESP_SDR_HAVE_EXTERNAL_FFT)
+endif ()
+message(STATUS "esp_sdr_source: wideband spectrum mode ${_have_fft}")
+
 # Stand-alone CLI check of the device client (no SDR++ needed at run time)
 option(ESP_SDR_BUILD_TEST "Build the esp_sdr_test command-line tool" ON)
 if (ESP_SDR_BUILD_TEST)

@@ -17,9 +17,11 @@ For SDR#, Android or remote use over the network, see [esp-sdr-bridge](https://g
 
 If the board does not answer, it may still be in its bootloader after flashing: press RESET or replug it.
 
-## Wideband 80 MHz spectrum: blocked by SDR++
+## Wideband 16 / 40 / 80 MHz spectrum (needs an SDR++ core API)
 
-ESP-SDR's Turbo Mode streams **16–80 MHz wide spectra** computed on the chip (as in the ESP-WebSDR browser viewer). SDR++ cannot show them yet: a source module can only deliver IQ, and the core always computes the waterfall itself. The same gap blocks an FFT-only SDR++ Server mode, [SDR++ #1356](https://github.com/AlexandreRouma/SDRPlusPlus/issues/1356). A small core API that lets a source supply the spectrum (`IQFrontEnd::setExternalFFTInput`) is implemented on a branch and planned as an SDR++ pull request; this module will then get a display-only wideband mode. Details: [docs/wideband-spectrum.md](docs/wideband-spectrum.md).
+ESP-SDR's Turbo Mode streams **16–80 MHz wide spectra** computed on the chip (as in the ESP-WebSDR browser viewer). The module has a display-only *Spectrum 16 / 40 / 80 MHz* mode (256 / 1024 / 2048 bins, optional max hold) that feeds these spectra straight into the SDR++ waterfall. There is no IQ in this mode, so nothing can be demodulated.
+
+Stock SDR++ cannot take a precomputed spectrum from a source: the core always computes the waterfall from IQ. The same gap blocks an FFT-only SDR++ Server mode, [SDR++ #1356](https://github.com/AlexandreRouma/SDRPlusPlus/issues/1356). The wideband mode therefore needs the small `IQFrontEnd::setExternalFFTInput` API, implemented on branch `feat/server-fft-stream` and planned as an SDR++ pull request. CMake detects it (`-DESP_SDR_EXTERNAL_FFT=AUTO|ON|OFF`); against a stock SDR++ the module builds with the IQ mode only, so it loads in official releases and nightlies. Details: [docs/wideband-spectrum.md](docs/wideband-spectrum.md).
 
 ## Build
 
@@ -48,6 +50,7 @@ No dependencies beyond SDR++ itself; the serial port code is plain Win32 / POSIX
 
 ```
 esp_sdr_test COM4 2350e6 60 250000 10 capture.cf32
+esp_sdr_test COM4 2350e6 40 80000000 10 - 0 256     # Turbo spectrum: peak and median per second
 ```
 
 ## How it works

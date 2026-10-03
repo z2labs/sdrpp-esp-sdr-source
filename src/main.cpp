@@ -28,6 +28,20 @@ ConfigManager config;
 static const int RATES[] = {250000, 125000, 62500};
 static const char* RATES_TXT = "250 kHz\0" "125 kHz\0" "62.5 kHz\0";
 
+// Wideband on-chip spectrum needs a core that lets a source supply the FFT
+// (IQFrontEnd::setExternalFFTInput, see docs/wideband-spectrum.md). Detected by CMake.
+#ifdef ESP_SDR_HAVE_EXTERNAL_FFT
+static const int MODES[] = {0, 16000000, 40000000, 80000000};
+static const char* MODES_TXT = "IQ (demodulation)\0" "Spectrum 16 MHz\0" "Spectrum 40 MHz\0" "Spectrum 80 MHz\0";
+static const int NMODES = 4;
+#else
+static const int MODES[] = {0};
+static const char* MODES_TXT = "IQ (demodulation)\0";
+static const int NMODES = 1;
+#endif
+static const int BINS[] = {256, 1024, 2048};
+static const char* BINS_TXT = "256\0" "1024\0" "2048\0";
+
 class ESPSDRSourceModule : public ModuleManager::Instance {
 public:
     ESPSDRSourceModule(std::string name) {
@@ -37,6 +51,9 @@ public:
         if (config.conf.contains("rateId")) rateId = std::clamp<int>(config.conf["rateId"], 0, 2);
         if (config.conf.contains("gain")) gain = std::clamp<int>(config.conf["gain"], 0, 82);
         if (config.conf.contains("ppm")) ppm = config.conf["ppm"];
+        if (config.conf.contains("modeId")) modeId = std::clamp<int>(config.conf["modeId"], 0, NMODES - 1);
+        if (config.conf.contains("binsId")) binsId = std::clamp<int>(config.conf["binsId"], 0, 2);
+        if (config.conf.contains("maxHold")) maxHold = config.conf["maxHold"];
         config.release();
         refreshPorts();
 
@@ -80,12 +97,17 @@ private:
         s.gain = gain;
         s.rate = RATES[rateId];
         s.ppm = ppm;
+        s.specRate = MODES[modeId];
+        s.bins = BINS[binsId];
+        s.maxHold = maxHold;
         return s;
     }
 
+    double inputRate() { return MODES[modeId] ? MODES[modeId] : RATES[rateId]; }
+
     static void menuSelected(void* ctx) {
         ESPSDRSourceModule* _this = (ESPSDRSourceModule*)ctx;
-        core::setInputSampleRate(RATES[_this->rateId]);
+        core::setInputSampleRate(_this->inputRate());
         flog::info("ESPSDRSourceModule '{0}': Menu Select!", _this->name);
     }
 
@@ -99,11 +121,28 @@ private:
         if (_this->running) { return; }
         _this->stream.clearWriteStop();
         std::string err;
+        espsdr::SpectrumCallback scb = nullptr;
+#ifdef ESP_SDR_HAVE_EXTERNAL_FFT
+        if (MODES[_this->modeId]) {
+            // Display-only: the chip's spectrum goes straight into the waterfall
+            core::setInputSampleRate(MODES[_this->modeId]);
+            sigpath::iqFrontEnd.setExternalFFTInput(true, BINS[_this->binsId]);
+            scb = [](const float* db, int bins, int) {
+                if (bins != sigpath::iqFrontEnd.getExternalFFTBinCount()) { sigpath::iqFrontEnd.setExternalFFTInput(true, bins); }
+                float* fft = sigpath::iqFrontEnd.acquireExternalFFTBuffer();
+                if (fft) { memcpy(fft, db, sizeof(float) * bins); }
+                sigpath::iqFrontEnd.releaseExternalFFTBuffer();
+            };
+        }
+#endif
         bool ok = _this->client.start(_this->port, _this->settings(), [_this](const float* iq, int n) {
             memcpy(_this->stream.writeBuf, iq, sizeof(float) * 2 * n);
             _this->stream.swap(n);
-        }, err);
+        }, err, scb);
         if (!ok) {
+#ifdef ESP_SDR_HAVE_EXTERNAL_FFT
+            sigpath::iqFrontEnd.setExternalFFTInput(false);
+#endif
             _this->error = err;
             flog::error("ESP-SDR: {}", err);
             return;
@@ -119,6 +158,9 @@ private:
         _this->stream.stopWriter();
         _this->client.stop();
         _this->stream.clearWriteStop();
+#ifdef ESP_SDR_HAVE_EXTERNAL_FFT
+        sigpath::iqFrontEnd.setExternalFFTInput(false);   // hand the spectrum back to the core
+#endif
         _this->running = false;
         flog::info("ESPSDRSourceModule '{0}': Stop!", _this->name);
     }
@@ -147,13 +189,39 @@ private:
         SmGui::FillWidth();
         if (SmGui::Button(CONCAT("Refresh ports##_espsdr_refr_", _this->name))) { _this->refreshPorts(); }
 
-        SmGui::LeftLabel("Samplerate");
-        SmGui::FillWidth();
-        if (SmGui::Combo(CONCAT("##_espsdr_sr_", _this->name), &_this->rateId, RATES_TXT)) {
-            core::setInputSampleRate(RATES[_this->rateId]);
-            config.acquire();
-            config.conf["rateId"] = _this->rateId;
-            config.release(true);
+        if (NMODES > 1) {
+            SmGui::LeftLabel("Mode");
+            SmGui::FillWidth();
+            if (SmGui::Combo(CONCAT("##_espsdr_mode_", _this->name), &_this->modeId, MODES_TXT)) {
+                core::setInputSampleRate(_this->inputRate());
+                config.acquire();
+                config.conf["modeId"] = _this->modeId;
+                config.release(true);
+            }
+        }
+        if (MODES[_this->modeId] == 0) {
+            SmGui::LeftLabel("Samplerate");
+            SmGui::FillWidth();
+            if (SmGui::Combo(CONCAT("##_espsdr_sr_", _this->name), &_this->rateId, RATES_TXT)) {
+                core::setInputSampleRate(RATES[_this->rateId]);
+                config.acquire();
+                config.conf["rateId"] = _this->rateId;
+                config.release(true);
+            }
+        }
+        else {
+            SmGui::LeftLabel("FFT bins");
+            SmGui::FillWidth();
+            if (SmGui::Combo(CONCAT("##_espsdr_bins_", _this->name), &_this->binsId, BINS_TXT)) {
+                config.acquire();
+                config.conf["binsId"] = _this->binsId;
+                config.release(true);
+            }
+            if (SmGui::Checkbox(CONCAT("Max hold##_espsdr_mh_", _this->name), &_this->maxHold)) {
+                config.acquire();
+                config.conf["maxHold"] = _this->maxHold;
+                config.release(true);
+            }
         }
         if (_this->running) { SmGui::EndDisabled(); }
 
@@ -209,6 +277,9 @@ private:
     std::string portsTxt;
     int portId = 0;
     int rateId = 0;
+    int modeId = 0;
+    int binsId = 0;
+    bool maxHold = false;
     int gain = 60;
     float ppm = 0.0f;
     std::string error;

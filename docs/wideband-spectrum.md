@@ -1,4 +1,4 @@
-# Wideband (Turbo) spectrum: why it is not in SDR++ yet
+# Wideband (Turbo) spectrum in SDR++
 
 ## What the ESP32-S3 can do
 
@@ -29,17 +29,31 @@ void releaseExternalFFTBuffer();
 
 While enabled, the internal FFT path is stopped and the waterfall takes whatever the source writes into the FFT buffer.
 
-## Plan for this module
-
-Once the API is in SDR++ (or when building against a tree that has it), this module gets a second mode:
+## Implementation in this module
 
 | Mode | Data from the S3 | SDR++ shows | Demodulation |
 | --- | --- | --- | --- |
-| IQ (now) | `IQS` stream, 250 / 125 / 62.5 kS/s | spectrum + waterfall from IQ | yes |
-| Wideband spectrum (planned) | `SPEC` stream, 16 / 40 / 80 MHz, 256–2048 bins | on-chip spectrum + waterfall via `setExternalFFTInput` | no (display only) |
+| IQ (demodulation) | `IQS` stream, 250 / 125 / 62.5 kS/s | spectrum + waterfall from IQ | yes |
+| Spectrum 16 / 40 / 80 MHz | `SPEC` stream, 256 / 1024 / 2048 bins | on-chip spectrum + waterfall via `setExternalFFTInput` | no (display only) |
 
-Implementation outline: switch the S3 to `SPEC`, set the SDR++ input sample rate to the span (so the frequency axis is right), call `sigpath::iqFrontEnd.setExternalFFTInput(true, bins)`, and for each `SPC1` frame convert the dB codes to dBFS, reorder from natural FFT order to low-to-high frequency, and copy them into `acquireExternalFFTBuffer()` / `releaseExternalFFTBuffer()`. Switching back restores the internal FFT path and the IQ stream.
+How the spectrum mode works:
 
-The module will detect the API at build time, so it keeps building against unmodified SDR++ releases.
+- `SPECINFO?` gives the supported profiles (rate, rate code, bins, stride, updates per frame). Older firmware without it falls back to the same table as the ESP-WebSDR viewer.
+- The S3 is tuned to the centre frequency, the analog filter is opened (`BANDWIDTH 0`) at 40 / 80 MS/s, and `SPEC` is started with mean or max-hold detection.
+- The SDR++ input sample rate is set to the span, so the frequency axis and the VFO ruler are right, and `sigpath::iqFrontEnd.setExternalFFTInput(true, bins)` stops the internal FFT path.
+- Each `SPC1` frame is CRC-checked and gap-checked; the codes become dBFS (`v / step - 84.3`, 0 = no data), they are reordered from natural FFT order to low-to-high frequency, and copied into `acquireExternalFFTBuffer()` / `releaseExternalFFTBuffer()`.
+- Stopping or switching back to IQ ends the stream (`SPECEND`), restores `BANDWIDTH 20` and calls `setExternalFFTInput(false)`.
+
+Tested on hardware with a CW tone from a VSG at centre + 10 MHz: 80 MHz / 256 bins ~50 spectra/s and 40 MHz / 1024 bins, peak exactly at +10.000 MHz, 0 CRC errors, 0 frame gaps.
+
+## Building
+
+CMake option `ESP_SDR_EXTERNAL_FFT`:
+
+- `AUTO` (default): the spectrum mode is built if `core/src/signal_path/iq_frontend.h` declares `setExternalFFTInput`.
+- `ON`: require it.
+- `OFF`: IQ mode only. Use this for a module that has to load in a stock SDR++ release or nightly: a module built against the extended core does not load in a stock one (the `IQFrontEnd` layout differs).
+
+Until the API is merged upstream, the spectrum mode needs SDR++ built from the branch that has it.
 
 Tracking: [issue #1](https://github.com/z2labs/sdrpp-esp-sdr-source/issues/1).

@@ -130,7 +130,8 @@ int Client::outShift(int gain) {
     return std::max(0, std::min(4, s));
 }
 
-bool Client::start(const std::string& name, const Settings& s, SampleCallback callback, std::string& error) {
+bool Client::start(const std::string& name, const Settings& s, SampleCallback callback, std::string& error,
+                   SpectrumCallback scallback) {
     stop();
     if (!port.open(name, error)) return false;
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
@@ -140,7 +141,11 @@ bool Client::start(const std::string& name, const Settings& s, SampleCallback ca
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
     port.flushInput();
     if (!command("CAPS", "CAPS", 1500)) { error = "no ESP-SDR firmware answering on " + name; port.close(); return false; }
+    bool hasSpec = reply.find(" SPEC") != std::string::npos;
+    specInfo = (hasSpec && command("SPECINFO?", "SPECINFO", 1500)) ? reply : std::string();
+    if (s.specRate && !hasSpec) { error = "this firmware has no SPEC (spectrum) mode"; port.close(); return false; }
     cb = callback;
+    scb = scallback;
     {
         std::lock_guard<std::mutex> l(mtx);
         want = s; dirty = true;
@@ -177,7 +182,7 @@ bool Client::command(const std::string& c, const char* expect, int timeoutMs) {
         int n = port.read(b, sizeof(b));
         for (int i = 0; i < n; i++) {
             if (b[i] == '\n') {
-                if (line.rfind(expect, 0) == 0 || line.rfind("ERR", 0) == 0) return line.rfind("ERR", 0) != 0;
+                if (line.rfind(expect, 0) == 0 || line.rfind("ERR", 0) == 0) { reply = line; return line.rfind("ERR", 0) != 0; }
                 line.clear();
             }
             else if (line.size() < 512) line.push_back((char)b[i]);
@@ -197,7 +202,7 @@ void Client::stopStream() {
         if (n > 0) {
             tail.append((const char*)b, n);
             if (tail.size() > 8192) tail.erase(0, tail.size() - 8192);
-            size_t p = tail.rfind("IQSEND");
+            size_t p = tail.rfind(cur.specRate ? "SPECEND" : "IQSEND");
             if (p != std::string::npos && tail.find('\n', p) != std::string::npos) break;
         }
     }
@@ -206,9 +211,57 @@ void Client::stopStream() {
     streaming = false;
 }
 
+// SPECINFO? profiles are [sample_rate_hz, rate_code, fft_bins, stride, units_per_frame(, continuous)].
+// Falls back to the strides the ESP-WebSDR viewer uses for the S3 dual-core firmware.
+bool Client::specProfile(int rate, int bins, int& code, int& stride, int& upf) {
+    for (size_t p = specInfo.find('['); p != std::string::npos; p = specInfo.find('[', p + 1)) {
+        long v[6] = {0}; int n = 0; const char* c = specInfo.c_str() + p + 1;
+        while (n < 6) {
+            char* e; long x = strtol(c, &e, 10);
+            if (e == c) break;
+            v[n++] = x; c = e;
+            while (*c == ',' || *c == ' ') c++;
+        }
+        if (n >= 5 && v[0] == rate && v[2] == bins) { code = (int)v[1]; stride = (int)v[3]; upf = (int)v[4]; return true; }
+    }
+    struct P { int rate, bins, code, stride, upf; };
+    static const P table[] = {{16000000, 256, 6, 2, 1}, {16000000, 1024, 6, 2, 4}, {16000000, 2048, 6, 3, 7},
+                              {40000000, 256, 1, 5, 3}, {40000000, 1024, 1, 5, 9}, {40000000, 2048, 1, 7, 17},
+                              {80000000, 256, 0, 10, 5}, {80000000, 1024, 0, 14, 16}, {80000000, 2048, 0, 14, 30}};
+    for (const P& t : table)
+        if (t.rate == rate && t.bins == bins) { code = t.code; stride = t.stride; upf = t.upf; return true; }
+    return false;
+}
+
 void Client::startStream(const Settings& s) {
     int64_t fk = (int64_t)std::llround(double(s.freqHz) * (1.0 - s.ppm * 1e-6) / 1e3);
     fk = std::max<int64_t>(FMIN / 1000, std::min<int64_t>(FMAX / 1000, fk));
+    if (s.specRate) {
+        // On-chip spectrum: LO at the centre, analog filter open at 40/80 MS/s (its default
+        // 20 MHz would only show filtered noise at the edges), ~50 spectra/s to the host
+        int code = 0, stride = 1, upf = 1;
+        if (!specProfile(s.specRate, s.bins, code, stride, upf)) { code = 6; stride = 2; upf = 1; }
+        int unitUs = (int)(12288ll * 1000000 / s.specRate);           // one ring unit
+        upf = std::max(upf, std::min(1000, 20000 / std::max(1, unitUs)));
+        command("FREQ " + std::to_string(fk / 1000), "OK", 1500);
+        command("FOFS " + std::to_string(fk % 1000), "OK", 1500);
+        command("GAIN MANUAL " + std::to_string(s.gain), "OK", 1500);
+        command(std::string("BANDWIDTH ") + (s.specRate > 16000000 ? "0" : "20"), "OK", 1500);
+        port.write("SPEC 0 " + std::to_string(stride) + " " + std::to_string(upf) + " " + (s.maxHold ? "1" : "0") + " " +
+                   std::to_string(code) + " " + std::to_string(s.bins) + "\n");
+        {
+            std::lock_guard<std::mutex> l(mtx);
+            tuneInfo = "Spectrum " + std::to_string(s.specRate / 1000000) + " MHz, " + std::to_string(s.bins) + " bins, " +
+                       (s.maxHold ? "max hold" : "mean");
+        }
+        specFs = s.specRate; specBins = s.bins;
+        buf.clear();
+        streaming = true; fresh = true; haveNext = false;
+        cur = s;
+        stats.retunes++;
+        return;
+    }
+    if (cur.specRate) command("BANDWIDTH 20", "OK", 1500);   // back to the default filter for IQ
     // LO fs/4 (4 MHz) below the wanted frequency; the chip shifts by +fs/4 before the FIR
     // (IQS mode 2), so LO leakage and the 1/f hump at 0 Hz IF stay outside the output band
     int64_t lo = fk - 4000;
@@ -246,8 +299,46 @@ void Client::worker() {
         if (n < 0) { run = false; break; }   // device unplugged
         if (n == 0) continue;
         buf.insert(buf.end(), b, b + n);
-        parse();
+        if (cur.specRate) parseSpec(); else parse();
     }
+}
+
+// SPC1: magic, u32 frame, u64 pair index, u32 pairs, u16 ffts, u8 flags, u8 gain, u16 drops,
+// u8 log2(n), u8 dB step, n codes (dB*step of |X|^2 in natural FFT order), u32 CRC.
+void Client::parseSpec() {
+    size_t pos = 0;
+    const uint8_t magic[4] = {'S', 'P', 'C', '1'};
+    while (true) {
+        auto it = std::search(buf.begin() + pos, buf.end(), magic, magic + 4);
+        if (it == buf.end()) { pos = buf.size() > 3 ? buf.size() - 3 : 0; break; }
+        size_t i = it - buf.begin();
+        if (buf.size() < i + 28) { pos = i; break; }
+        const uint8_t* h = buf.data() + i;
+        int log2n = h[26];
+        if (log2n < 6 || log2n > 12) { pos = i + 4; continue; }
+        int n = 1 << log2n;
+        size_t L = 28 + (size_t)n + 4;
+        if (buf.size() < i + L) { pos = i; break; }
+        uint32_t crc; memcpy(&crc, h + L - 4, 4);
+        pos = i + L;
+        if (crc32(h, L - 4) != crc) { stats.crcErrors++; continue; }
+        if (n != specBins) continue;
+        uint32_t fr; memcpy(&fr, h + 4, 4);
+        if (haveNext && fr != (uint32_t)nextIdx) { stats.gaps++; stats.lost += (uint32_t)(fr - (uint32_t)nextIdx); }
+        nextIdx = (uint32_t)(fr + 1); haveNext = true;
+        stats.frames++;
+        float step = h[27] ? (float)h[27] : 2.0f;
+        const uint8_t* c = h + 28;
+        spec.resize(n);
+        // Same mapping as the ESP-WebSDR viewer: fftshift + mirror (S3: RF above LO is negative),
+        // code/step = 10log10|X|^2, -84.3 dB to dBFS (full scale 512, Hann power normalisation)
+        for (int j = 0; j < n; j++) {
+            uint8_t v = c[(n / 2 - j + n) % n];
+            spec[j] = v ? v / step - 84.3f : -140.0f;
+        }
+        if (scb) scb(spec.data(), n, specFs);
+    }
+    if (pos) buf.erase(buf.begin(), buf.begin() + std::min(pos, buf.size()));
 }
 
 void Client::parse() {
