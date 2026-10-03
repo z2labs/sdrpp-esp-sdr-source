@@ -36,6 +36,8 @@ While enabled, the internal FFT path is stopped and the waterfall takes whatever
 | IQ (demodulation) | `IQS` stream, 250 / 125 / 62.5 kS/s | spectrum + waterfall from IQ | yes |
 | Spectrum 16 / 40 / 80 MHz | `SPEC` stream, 256 / 1024 / 2048 bins | on-chip spectrum + waterfall via `setExternalFFTInput` | no (display only) |
 
+![SDR++ Spectrum 80 MHz mode](img/sdrpp_80mhz_spectrum.png)
+
 How the spectrum mode works:
 
 - `SPECINFO?` gives the supported profiles (rate, rate code, bins, stride, updates per frame). Older firmware without it falls back to the same table as the ESP-WebSDR viewer.

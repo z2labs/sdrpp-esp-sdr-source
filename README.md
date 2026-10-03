@@ -21,6 +21,10 @@ If the board does not answer, it may still be in its bootloader after flashing: 
 
 ESP-SDR's Turbo Mode streams **16–80 MHz wide spectra** computed on the chip (as in the ESP-WebSDR browser viewer). The module has a display-only *Spectrum 16 / 40 / 80 MHz* mode (256 / 1024 / 2048 bins, optional max hold) that feeds these spectra straight into the SDR++ waterfall. There is no IQ in this mode, so nothing can be demodulated.
 
+![SDR++ with the ESP32-S3 in Spectrum 80 MHz mode, 2048 bins: 2.31-2.39 GHz, CW from a VSG at 2.36 GHz](docs/img/sdrpp_80mhz_spectrum.png)
+
+*Spectrum 80 MHz, 2048 bins, gain 28: 2.31–2.39 GHz in one view, CW test tone (−50 dBm, near-field) at 2.360 GHz, 0 CRC errors, 0 gaps.*
+
 Stock SDR++ cannot take a precomputed spectrum from a source: the core always computes the waterfall from IQ. The same gap blocks an FFT-only SDR++ Server mode, [SDR++ #1356](https://github.com/AlexandreRouma/SDRPlusPlus/issues/1356). The wideband mode therefore needs the small `IQFrontEnd::setExternalFFTInput` API, implemented on branch `feat/server-fft-stream` and planned as an SDR++ pull request. CMake detects it (`-DESP_SDR_EXTERNAL_FFT=AUTO|ON|OFF`); against a stock SDR++ the module builds with the IQ mode only, so it loads in official releases and nightlies. Details: [docs/wideband-spectrum.md](docs/wideband-spectrum.md).
 
 ## Build
