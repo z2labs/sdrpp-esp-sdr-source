@@ -4,7 +4,9 @@
 //   start | stop | set key=value ... | sync [timeout_s] | cap N file [timeout_s] | stats | quit
 //   sync: wait until the stream has restarted with the last 'set' (replies SYNC <seconds>)
 //   keys: freq gain rate ppm spec bins maxhold extra   (spec=0: IQ; spec=16e6/40e6/80e6: SPEC)
-//   cap: next N complex samples (IQ, cf32) or N spectra (SPEC, float32 dBFS x bins) to file
+//   cap: next N complex samples (IQ, cf32) or N spectra (SPEC, float32 dBFS x bins) to file;
+//        cap N file timeout 1 also writes file.ts: {double steady-clock s, int64 count} per callback
+//        (steady_clock = QueryPerformanceCounter on Windows, same time base as Python's perf_counter)
 #include "esp_sdr_client.h"
 #include <chrono>
 #include <condition_variable>
@@ -20,8 +22,15 @@ struct Capture {
     std::mutex m;
     std::condition_variable cv;
     FILE* f = nullptr;
+    FILE* ts = nullptr;     // optional: <file>.ts, per callback {double steady_s, int64 count after it}
     long long left = 0, done = 0;
     int bins = 0;
+    void stamp() {
+        if (!ts) return;
+        double t = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+        long long d = done;
+        fwrite(&t, sizeof(t), 1, ts); fwrite(&d, sizeof(d), 1, ts);
+    }
 };
 
 int main(int argc, char** argv) {
@@ -36,14 +45,14 @@ int main(int argc, char** argv) {
         if (!cap.f || cap.left <= 0) return;
         long long k = n < cap.left ? n : cap.left;
         fwrite(x, sizeof(float), (size_t)(2 * k), cap.f);
-        cap.left -= k; cap.done += k;
+        cap.left -= k; cap.done += k; cap.stamp();
         if (!cap.left) cap.cv.notify_all();
     };
     auto spec = [&](const float* db, int n, int) {
         std::lock_guard<std::mutex> l(cap.m);
         if (!cap.f || cap.left <= 0) return;
         fwrite(db, sizeof(float), (size_t)n, cap.f);
-        cap.bins = n; cap.left--; cap.done++;
+        cap.bins = n; cap.left--; cap.done++; cap.stamp();
         if (!cap.left) cap.cv.notify_all();
     };
     std::string line;
@@ -85,15 +94,18 @@ int main(int argc, char** argv) {
             printf("%s %.4f\n", c.applied(seq) ? "SYNC" : "TIMEOUT", dt);
         }
         else if (cmd == "cap") {
-            long long n = 0; std::string file; double timeout = 10;
-            in >> n >> file >> timeout;
+            long long n = 0; std::string file; double timeout = 10; int stamps = 0;
+            in >> n >> file >> timeout >> stamps;
             FILE* f = fopen(file.c_str(), "wb");
             if (!f) { printf("ERR cannot open %s\n", file.c_str()); fflush(stdout); continue; }
+            FILE* ts = stamps ? fopen((file + ".ts").c_str(), "wb") : nullptr;
             std::unique_lock<std::mutex> l(cap.m);
-            cap.f = f; cap.left = n; cap.done = 0;
+            cap.f = f; cap.ts = ts; cap.left = n; cap.done = 0;
+            cap.stamp();   // t of the request, count 0
             bool ok = cap.cv.wait_for(l, std::chrono::duration<double>(timeout), [&] { return cap.left == 0; });
-            cap.f = nullptr;
+            cap.f = nullptr; cap.ts = nullptr;
             fclose(f);
+            if (ts) fclose(ts);
             double dt = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
             printf("%s %lld %.3f %d\n", ok ? "CAP" : "TIMEOUT", cap.done, dt, cap.bins);
         }

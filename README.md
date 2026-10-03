@@ -10,7 +10,13 @@ Native [SDR++](https://github.com/AlexandreRouma/SDRPlusPlus) source module for 
 - 2204–2804 MHz in 1 kHz steps, gain index 0–82, ppm correction
 - CRC and sample-index continuity checked on every frame, shown in the source menu
 
-For SDR#, Android or remote use over the network, see [esp-sdr-bridge](https://github.com/z2labs/esp-sdr-bridge) (SpyServer + rtl_tcp).
+For SDR#, Android or remote use over the network, see [esp-sdr-bridge](https://github.com/z2labs/esp-sdr-bridge) (SpyServer + rtl_tcp). Android with USB OTG and the spectrum mode: **SDR++ ESP** APK from the [z2labs/SDRPlusPlus](https://github.com/z2labs/SDRPlusPlus) fork (branch `esp-sdr`).
+
+## Measurements
+
+**[docs/MEASUREMENTS.md](docs/MEASUREMENTS.md)**: 6 h VSG campaign plus receiver characterisation (VSG60, near field). In short: 0 CRC errors / gaps / lost samples over 5.6 h of soak, 300 retunes, 100 mode switches and 50 stop/start cycles; IQ passband 0.1 dB p-p, image -57 ... -70 dBc; 66 dB linear range; two-tone IM3 -54 dBc; ADEV 3.3e-9 @ 1 s; retune 80 ms.
+
+Tips from the measurements: in spectrum mode use gain 40 or more; set the PPM after a few minutes of streaming (the board warms up by up to ~0.8 ppm); for strong signals at 250 kS/s (8-bit link) lower the gain or use 125 / 62.5 kS/s.
 
 ## Use
 

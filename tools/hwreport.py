@@ -110,7 +110,8 @@ if Cdc:
         say("\n![Cdc](%s)\n" % fig("C_dc.png"))
 
 # ---- D ----
-say("## D. Stress (SDR++ host calls via esp_sdr_emu)\n")
+if any(T(n) for n in ("D1", "D2", "D3", "D4sum")):
+    say("## D. Stress (SDR++ host calls via esp_sdr_emu)\n")
 for name, label in (("D1sum", "random retunes (all rates, every 10th a 20-step drag burst)"), ("D2sum", "IQ <-> SPEC mode switches"),
                     ("D3sum", "stop / start cycles")):
     for r in T(name):
@@ -151,6 +152,10 @@ if P:
     if fine: say("- within 2430-2431 MHz (50 kHz steps): %.0f ... %+.0f Hz" % (min(x for _, x in fine), max(x for _, x in fine)))
     np.savetxt(os.path.join(d, "P_error_map.csv"), np.c_[fr, e], delimiter=",", header="f_hz,err_hz", comments="")
     say("\n![P](%s)\n" % fig("P_tuning_error.png"))
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import hwreport_more
+hwreport_more.sections(d, T, say, fig)
 
 st = T("start"); en = T("end")
 hdr = ["# ESP-SDR SDR++ module: hardware test", ""]
