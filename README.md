@@ -1,5 +1,9 @@
 # ESP-SDR source for SDR++ (ESP32-S3)
 
+<a href="https://youtu.be/sy-2_04tZBM" target="_blank"><img src="docs/img/video.jpg" alt="Demo video: ESP32-S3 80 MHz spectrum in SDR++ (YouTube)" width="720"></a>
+
+*Demo video (YouTube): the ESP32-S3 streaming an 80 MHz on-chip spectrum into SDR++.*
+
 Native [SDR++](https://github.com/AlexandreRouma/SDRPlusPlus) source module for an ESP32-S3 running [ESP-SDR](https://github.com/ESPARGOS/esp-sdr): real IQ over the plain USB cable, straight into SDR++, with no bridge, plugin stack or network server in between.
 
 - 250 / 125 / 62.5 kS/s gapless complex IQ (two-stage FIR DDC on the S3's second core)
