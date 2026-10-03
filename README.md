@@ -17,6 +17,10 @@ For SDR#, Android or remote use over the network, see [esp-sdr-bridge](https://g
 
 If the board does not answer, it may still be in its bootloader after flashing: press RESET or replug it.
 
+## Wideband 80 MHz spectrum: blocked by SDR++
+
+ESP-SDR's Turbo Mode streams **16–80 MHz wide spectra** computed on the chip (as in the ESP-WebSDR browser viewer). SDR++ cannot show them yet: a source module can only deliver IQ, and the core always computes the waterfall itself. The same gap blocks an FFT-only SDR++ Server mode, [SDR++ #1356](https://github.com/AlexandreRouma/SDRPlusPlus/issues/1356). A small core API that lets a source supply the spectrum (`IQFrontEnd::setExternalFFTInput`) is implemented on a branch and planned as an SDR++ pull request; this module will then get a display-only wideband mode. Details: [docs/wideband-spectrum.md](docs/wideband-spectrum.md).
+
 ## Build
 
 The module builds either inside the SDR++ tree or out-of-tree against an existing SDR++ build. The module uses SDR++'s C++ API, so build it against the same SDR++ version you run.
