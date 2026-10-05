@@ -30,7 +30,7 @@ Connect the board's **native USB** port (Espressif USB Serial/JTAG, 303A:1001; o
 
 *Demo video (YouTube): the ESP32-S3 Wi-Fi radio listening to the FM broadcast band through a moRFeus upconverter.*
 
-The S3's receiver only tunes 2.2–2.8 GHz, so here it is the IF stage behind a [moRFeus](https://www.crowdsupply.com/othernet/morfeus) upconverter (Othernet, Crowd Supply), a frequency converter and signal generator whose RF and hardware design was done by Zoltan Doczi as a consultant. With the moRFeus LO at 2259.1 MHz, 90.9 MHz (Jazzy) lands at 2350 MHz. The on-chip 40 MHz spectrum mode then shows the whole FM band, from about 71 to 111 MHz, at once in SDR++, and IQ mode demodulates it (WFM, stereo). On coax with a VSG60, the same receiver measured 12 dB SINAD at about −113 dBm for narrowband FM at 2.35 GHz, with a strong-signal SINAD of around 42 dB (see [Measurements](#measurements)).
+The S3's receiver only tunes 2.2–2.8 GHz, so here it is the IF stage behind a [moRFeus](https://www.crowdsupply.com/othernet/morfeus) upconverter (Othernet, Crowd Supply), a frequency converter and signal generator whose RF and hardware design was done by Zoltan Doczi as a consultant. With the moRFeus LO at 2259.1 MHz, 90.9 MHz (Jazzy) lands at 2350 MHz. The on-chip 40 MHz spectrum mode then shows the whole FM band, from about 71 to 111 MHz, at once in SDR++, and IQ mode demodulates it (WFM, stereo). On coax with a VSG60, the same receiver measured 12 dB SINAD at about −114 dBm for narrowband FM at 2.35 GHz, with a strong-signal SINAD of around 42 dB (see [Measurements](#measurements)).
 
 <img src="docs/img/fm_broadcast_band.png" alt="FM broadcast band seen through an upconverter by the ESP32-S3 in SDR++ (Spectrum 40 MHz mode)" width="860">
 
@@ -67,13 +67,13 @@ To read the band directly in SDR++, set *Offset mode* to *Custom* and the offset
 
 ### Conducted: phase noise, NBFM SINAD, sensitivity (5 Oct 2026)
 
-Setup: Signal Hound VSG60 → 10 dB pad → coax pigtail soldered to the S3 module (PCB antenna removed), 62.5 kS/s 16-bit IQ, gain 70; levels are at the S3 input.
+Setup: Signal Hound VSG60 → cable + 10 dB pad (11.2 dB measured) → coax pigtail soldered to the S3 module (PCB antenna removed), 62.5 kS/s 16-bit IQ, gain 70; levels are at the S3 input.
 
 | | 2350 MHz | 2480 MHz | 2700 MHz |
 | --- | --- | --- | --- |
 | Phase noise @ 100 Hz / 1 kHz / 10 kHz (dBc/Hz) | −70 / −86 / −90 | −68 / −82 / −83 ¹ | −70 / −85 / −89 |
 | NBFM SINAD, strong signal (1 kHz tone, 3 kHz dev, 0.3–3 kHz) | 42 dB | 41 dB | 41 dB |
-| NBFM 12 dB SINAD sensitivity | **−113 dBm** | **−111 dBm** | **−110 dBm** |
+| NBFM 12 dB SINAD sensitivity | **−114 dBm** | **−112 dBm** | **−111.5 dBm** |
 
 - **Stability:** bare 40 MHz crystal, no TCXO. ADEV 6e-10 @ 1 s and 4e-9 @ 100 s. 97 Hz p-p over 20 min at 2350 MHz in still air; a draught can move it by several hundred Hz.
 - **Tuning error:** crystal offset (about −1.7 ppm on this board, VSG60 reference included) plus a deterministic ±150 Hz sawtooth with a 30 MHz period from the fractional-N PLL.
@@ -81,8 +81,8 @@ Setup: Signal Hound VSG60 → 10 dB pad → coax pigtail soldered to the S3 modu
 
 Caveats:
 - Above about 300 Hz offset the phase noise is an upper bound. An S3 and a BB60C measured with the same VSG60 give nearly identical curves there, so the generator's own phase noise is likely included; at 100 Hz the S3 is about 5 dB worse than the BB60C.
-- Below −95 dBm at the S3 input the VSG60's level accuracy is not specified; treat the sensitivity figures as ±2–3 dB until checked against a calibrated receiver.
-- ¹ 2480 MHz is 62 × 40 MHz, an internal birdie of the board, and it sits in the Wi-Fi band. Nearby Wi-Fi leaked into the unshielded board: switching the access points off cut the disturbed 0.25 s blocks from 6.4 to 3.7 per 4 s capture and moved the 2480 MHz sensitivity from −108 to −111 dBm.
+- VSG60 output checked with a BB60C: linear within ±0.1 dB from −50 to −120 dBm; the cable + 10 dB pad chain loses 11.2 dB at 2350 MHz, which is used for the input levels below (the pigtail's own loss is not included, so the sensitivity figures are slightly conservative).
+- ¹ 2480 MHz is 62 × 40 MHz, an internal birdie of the board, and it sits in the Wi-Fi band. Nearby Wi-Fi leaked into the unshielded board: switching the access points off cut the disturbed 0.25 s blocks from 6.4 to 3.7 per 4 s capture and moved the 2480 MHz sensitivity from −109 to −112 dBm.
 
 <table>
 <tr>

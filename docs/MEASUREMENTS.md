@@ -253,7 +253,7 @@ Total CRC errors 0, gaps 0, lost samples 0.
 
 ## Conducted campaign: phase noise, NBFM, sensitivity (`campaign_coax10`, 5 Oct 2026)
 
-Setup: Signal Hound VSG60 → 10 dB pad → coax pigtail soldered to the S3 module, PCB antenna removed, board not shielded. IQ 62.5 kS/s (16-bit link) unless noted, PPM 0. All levels are at the S3 input (VSG level − 10 dB). Script: `tools/hwcampaign.py --atten 10`; maths in `tools/hwpn.py` (`--selftest` checks L(f), residual FM and SINAD on synthetic signals with known values).
+Setup: Signal Hound VSG60 → 10 dB pad → coax pigtail soldered to the S3 module, PCB antenna removed, board not shielded. IQ 62.5 kS/s (16-bit link) unless noted, PPM 0. All levels are at the S3 input: VSG level − 11.2 dB (cable + 10 dB pad, measured with a BB60C; the VSG60 was linear within ±0.1 dB from −50 to −120 dBm). Script: `tools/hwcampaign.py --atten 10`; maths in `tools/hwpn.py` (`--selftest` checks L(f), residual FM and SINAD on synthetic signals with known values).
 
 ### A. Linearity per gain (2350 MHz)
 
@@ -301,12 +301,18 @@ Mean offset −3911 Hz (−1.66 ppm), 97 Hz p-p over 20 min, 0 gaps. ADEV about 
 | −70 dBm | 42 dB | 41.5 dB | 41.4 dB |
 | −90 dBm | 36.8 dB | 26.1 dB | 34.0 dB |
 | −100 dBm | 27.5 dB | 17.9 dB | 24.9 dB |
-| **12 dB SINAD** | **−113 dBm** | **−111 dBm** | **−110 dBm** |
+| **12 dB SINAD** | **−114 dBm** | **−112 dBm** | **−111.5 dBm** |
 
 Notes:
 - The board is unshielded and the antenna feed is open, so nearby 2.4 GHz traffic leaks in and shows as 0.25 s blocks where the carrier amplitude dips and the discriminator clicks. Those blocks are excluded and counted.
-  - With the Wi-Fi access points on: 6.4 disturbed blocks per 4 s capture, 2 of 45 captures clean, 2480 MHz sensitivity −108 dBm.
-  - With them off: 3.7 per capture, 23 of 39 clean, 2480 MHz sensitivity −111 dBm.
+  - With the Wi-Fi access points on: 6.4 disturbed blocks per 4 s capture, 2 of 45 captures clean, 2480 MHz sensitivity −109 dBm.
+  - With them off: 3.7 per capture, 23 of 39 clean, 2480 MHz sensitivity −112 dBm.
   - Some disturbance remained (2700 MHz, −72…−82 and −106…−108 dBm have no valid point). A shielded box is needed for a final number.
-- Below −95 dBm at the S3 input (VSG below −85 dBm) the VSG60's level accuracy is not specified, so the sensitivity figures are ±2–3 dB until checked against a calibrated receiver.
+- VSG60 output checked with a BB60C: linear within ±0.1 dB from −50 to −120 dBm; the cable + 10 dB pad chain loses 11.2 dB at 2350 MHz, which is used for the input levels below (the pigtail's own loss is not included, so the sensitivity figures are slightly conservative). The rows of the table above use the nominal −10 dB; the true input is 1.2 dB lower.
 - The strong-signal ceiling of about 42 dB is set by close-in phase noise / residual FM; part of it may be the VSG60's.
+
+### VSG60 level check (BB60C, 2350 MHz)
+
+VSG60 stepped from −50 to −120 dBm in 5 dB steps into a BB60C, tone power from 2 s IQ captures. Measured minus set is constant within ±0.1 dB over the whole range, also below the VSG60's specified −55 / −85 dBm limits. Cable alone: −1.3 dB; cable + 10 dB pad (the chain used for the S3): −11.2 dB.
+
+<img src="img/hw/coax/vsg_level_check.png" width="760">
