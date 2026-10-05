@@ -49,6 +49,37 @@ Connect the board's **native USB** port (Espressif USB Serial/JTAG, 303A:1001; o
 </tr>
 </table>
 
+### Conducted: phase noise, NBFM SINAD, sensitivity (5 Oct 2026)
+
+Setup: Signal Hound VSG60 → 10 dB pad → coax pigtail soldered to the S3 module (PCB antenna removed), 62.5 kS/s 16-bit IQ, gain 70; levels are at the S3 input.
+
+| | 2350 MHz | 2480 MHz | 2700 MHz |
+| --- | --- | --- | --- |
+| Phase noise @ 100 Hz / 1 kHz / 10 kHz (dBc/Hz) | −70 / −86 / −90 | −68 / −82 / −83 ¹ | −70 / −85 / −89 |
+| NBFM SINAD, strong signal (1 kHz tone, 3 kHz dev, 0.3–3 kHz) | 42 dB | 41 dB | 41 dB |
+| NBFM 12 dB SINAD sensitivity | **−113 dBm** | **−111 dBm** | **−110 dBm** |
+
+- **Stability:** bare 40 MHz crystal, no TCXO. ADEV 6e-10 @ 1 s and 4e-9 @ 100 s. 97 Hz p-p over 20 min at 2350 MHz in still air; a draught can move it by several hundred Hz.
+- **Tuning error:** crystal offset (about −1.7 ppm on this board, VSG60 reference included) plus a deterministic ±150 Hz sawtooth with a 30 MHz period from the fractional-N PLL.
+- **Linearity:** the 62.5 kS/s link is linear to −60 dBm at gain 70. The 8-bit 250 kS/s link saturates about 48 dB above the noise and has a phase-noise floor near −74 dBc/Hz, so use 62.5 kS/s for anything precise.
+
+Caveats:
+- Above about 300 Hz offset the phase noise is an upper bound. An S3 and a BB60C measured with the same VSG60 give nearly identical curves there, so the generator's own phase noise is likely included; at 100 Hz the S3 is about 5 dB worse than the BB60C.
+- Below −95 dBm at the S3 input the VSG60's level accuracy is not specified; treat the sensitivity figures as ±2–3 dB until checked against a calibrated receiver.
+- ¹ 2480 MHz is 62 × 40 MHz, an internal birdie of the board, and it sits in the Wi-Fi band. Nearby Wi-Fi leaked into the unshielded board: switching the access points off cut the disturbed 0.25 s blocks from 6.4 to 3.7 per 4 s capture and moved the 2480 MHz sensitivity from −108 to −111 dBm.
+
+<table>
+<tr>
+<td colspan="2"><img src="docs/img/hw/coax/pn_sinad.png" width="860"><br><sub>Phase noise (left) and NBFM SINAD vs. input level (right), conducted</sub></td>
+</tr>
+<tr>
+<td><img src="docs/img/hw/coax/G_tuning.png" width="420"><br><sub>Tuning error 2230–2780 MHz: crystal offset + PLL sawtooth</sub></td>
+<td><img src="docs/img/hw/coax/B_stability.png" width="420"><br><sub>20 min frequency track and Allan deviation</sub></td>
+</tr>
+</table>
+
+Scripts: `tools/hwcampaign.py` (whole campaign, `--atten`, `--levels`), `tools/hwpn.py` (phase noise / residual FM / SINAD maths, `--selftest`), `tools/pn_ext.py` (the same tests on HackRF, RTL-SDR and BB60C), `tools/pn_compare.py`, `tools/hwfreqtrack.py`.
+
 Full report with all plots (tuning error map, gain curve, linearity, noise, phase noise, IMD3, blocking, latency, IQ imbalance vs. frequency): **[docs/MEASUREMENTS.md](docs/MEASUREMENTS.md)**
 
 Tips from the measurements: in spectrum mode use gain 40 or more; set the PPM after a few minutes of streaming; for strong signals at 250 kS/s (8-bit link) lower the gain or use 125 / 62.5 kS/s.

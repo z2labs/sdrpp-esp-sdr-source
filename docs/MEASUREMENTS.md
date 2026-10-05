@@ -249,3 +249,64 @@ Total CRC errors 0, gaps 0, lost samples 0.
 
 ![I](img/hw/hwextra_I/I_imd3.png)
 
+
+
+## Conducted campaign: phase noise, NBFM, sensitivity (`campaign_coax10`, 5 Oct 2026)
+
+Setup: Signal Hound VSG60 → 10 dB pad → coax pigtail soldered to the S3 module, PCB antenna removed, board not shielded. IQ 62.5 kS/s (16-bit link) unless noted, PPM 0. All levels are at the S3 input (VSG level − 10 dB). Script: `tools/hwcampaign.py --atten 10`; maths in `tools/hwpn.py` (`--selftest` checks L(f), residual FM and SINAD on synthetic signals with known values).
+
+### A. Linearity per gain (2350 MHz)
+
+The 62.5 kS/s link is linear up to −60 dBm at gain 70. The 8-bit 250 kS/s link has its full scale tied to the gain and hits a ceiling about 48 dB above the noise; at −65 dBm only gain ≤ 30 stays linear there.
+
+<img src="img/hw/coax/A_linearity.png" width="860">
+
+### G. Tuning error 2230–2780 MHz (10 MHz steps)
+
+The error is a straight crystal-offset line (about −1.76 ppm on this board; the VSG60 reference error is included) plus a deterministic sawtooth from the fractional-N PLL: +150 Hz every 10 MHz, −300 Hz every 30 MHz. The sawtooth is repeatable and can be corrected in the host.
+
+<img src="img/hw/coax/G_tuning.png" width="760">
+
+### C. Phase noise (−65 dBm CW)
+
+Each measurement averages 3 s blocks, removing each block's own tone frequency and slow drift, so the crystal's thermal wander does not leak into the close-in offsets. Floor = same chain with the VSG off.
+
+| Offset | 100 Hz | 1 kHz | 10 kHz | floor |
+| --- | --- | --- | --- | --- |
+| 2350 MHz | −70 | −86 | −90 | −97 dBc/Hz |
+| 2480 MHz | −68 | −82 | −83 | −82 dBc/Hz (62 × 40 MHz birdie) |
+| 2700 MHz | −70 | −85 | −89 | −94 dBc/Hz |
+
+- A repeat at 2350 MHz after the 20 min run gave −71 / −86 / −90.
+- Above ~300 Hz offset these are upper bounds. A BB60C measured with the same VSG60 gives nearly the same curve (−85 dBc/Hz @ 1 kHz, −91 @ 10 kHz), so the generator's phase noise is probably what both see. At 100 Hz the S3 is about 5 dB worse than the BB60C, which is the S3's own close-in noise.
+- Internal spurs at 80 Hz, 240 Hz, 1.3 kHz and 2.6 kHz offset show at every frequency; 240 Hz is also present with the VSG off.
+- The 250 kS/s (8-bit) link's floor is about −74 dBc/Hz, so it cannot measure phase noise; values above 13 kHz offset are therefore not reported.
+
+<img src="img/hw/coax/pn_sinad.png" width="860">
+
+### B. Frequency stability (20 min gapless capture, 2350 MHz)
+
+Mean offset −3911 Hz (−1.66 ppm), 97 Hz p-p over 20 min, 0 gaps. ADEV about 2e-10 at 0.1 s, 5.9e-10 at 1 s and 3.6e-9 at 100 s; this is the S3 crystal against the VSG60's internal reference. The crystal is bare (no TCXO): blowing on the board shifted the carrier by several hundred Hz.
+
+<img src="img/hw/coax/B_stability.png" width="860">
+
+### D / E. NBFM: residual FM and SINAD vs. level
+
+- **D:** the residual FM of a CW in the 0.3–3 kHz audio band gives the phase-noise-limited S/N for 3 kHz deviation.
+- **E:** VSG60 FM (1 kHz sine, 3 kHz deviation) demodulated by an ideal discriminator (±7.5 kHz brick-wall IF), SINAD in 0.25 s blocks with a ±12 Hz notch, median over the blocks.
+- At 2350 MHz the two methods agree within 1 dB at the 12 dB point (−113.1 vs −113.9 dBm).
+
+| Input | 2350 MHz | 2480 MHz | 2700 MHz |
+| --- | --- | --- | --- |
+| −70 dBm | 42 dB | 41.5 dB | 41.4 dB |
+| −90 dBm | 36.8 dB | 26.1 dB | 34.0 dB |
+| −100 dBm | 27.5 dB | 17.9 dB | 24.9 dB |
+| **12 dB SINAD** | **−113 dBm** | **−111 dBm** | **−110 dBm** |
+
+Notes:
+- The board is unshielded and the antenna feed is open, so nearby 2.4 GHz traffic leaks in and shows as 0.25 s blocks where the carrier amplitude dips and the discriminator clicks. Those blocks are excluded and counted.
+  - With the Wi-Fi access points on: 6.4 disturbed blocks per 4 s capture, 2 of 45 captures clean, 2480 MHz sensitivity −108 dBm.
+  - With them off: 3.7 per capture, 23 of 39 clean, 2480 MHz sensitivity −111 dBm.
+  - Some disturbance remained (2700 MHz, −72…−82 and −106…−108 dBm have no valid point). A shielded box is needed for a final number.
+- Below −95 dBm at the S3 input (VSG below −85 dBm) the VSG60's level accuracy is not specified, so the sensitivity figures are ±2–3 dB until checked against a calibrated receiver.
+- The strong-signal ceiling of about 42 dB is set by close-in phase noise / residual FM; part of it may be the VSG60's.
