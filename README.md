@@ -26,7 +26,11 @@ Connect the board's **native USB** port (Espressif USB Serial/JTAG, 303A:1001; o
 
 ## FM broadcast band through an upconverter
 
-The S3 only tunes 2.2–2.8 GHz, but with a mixer in front it works as the IF stage of an upconverter. Here the upconverter is a [moRFeus](https://www.crowdsupply.com/othernet/morfeus) (Othernet, Crowd Supply), a frequency converter and signal generator whose RF and hardware design was done by Zoltan Doczi as a consultant. With its LO at 2259.1 MHz, Jazzy (90.9 MHz) lands at 2350 MHz, and the 40 MHz spectrum mode shows the whole FM band from about 71 to 111 MHz at once (5 Oct 2026):
+<a href="https://youtu.be/WVA4J9Fg5GE" target="_blank"><img src="docs/img/video_fm.jpg" alt="Demo video: FM broadcast reception with an ESP32-S3 behind a moRFeus upconverter (YouTube)" width="640"></a>
+
+*Demo video (YouTube): the ESP32-S3 Wi-Fi radio listening to the FM broadcast band through a moRFeus upconverter.*
+
+The S3's receiver only tunes 2.2–2.8 GHz, so here it is the IF stage behind a [moRFeus](https://www.crowdsupply.com/othernet/morfeus) upconverter (Othernet, Crowd Supply), a frequency converter and signal generator whose RF and hardware design was done by Zoltan Doczi as a consultant. With the moRFeus LO at 2259.1 MHz, 90.9 MHz (Jazzy) lands at 2350 MHz. The on-chip 40 MHz spectrum mode then shows the whole FM band, from about 71 to 111 MHz, at once in SDR++, and IQ mode demodulates it (WFM, stereo). On coax with a VSG60, the same receiver measured 12 dB SINAD at about −113 dBm for narrowband FM at 2.35 GHz, with a strong-signal SINAD of around 42 dB (see [Measurements](#measurements)).
 
 <img src="docs/img/fm_broadcast_band.png" alt="FM broadcast band seen through an upconverter by the ESP32-S3 in SDR++ (Spectrum 40 MHz mode)" width="860">
 
