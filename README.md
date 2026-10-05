@@ -10,13 +10,36 @@ Native [SDR++](https://github.com/AlexandreRouma/SDRPlusPlus) source module for 
 - 2204–2804 MHz in 1 kHz steps, gain index 0–82, ppm correction
 - CRC and sample-index continuity checked on every frame, shown in the source menu
 
-For SDR#, Android or remote use over the network, see [esp-sdr-bridge](https://github.com/z2labs/esp-sdr-bridge) (SpyServer + rtl_tcp). Android with USB OTG and the spectrum mode: **SDR++ ESP** APK from the [z2labs/SDRPlusPlus](https://github.com/z2labs/SDRPlusPlus) fork (branch `esp-sdr`).
+For SDR#, Android or remote use over the network, see [esp-sdr-bridge](https://github.com/z2labs/esp-sdr-bridge) (SpyServer + rtl_tcp). Android with USB OTG and the spectrum mode: **SDR++ ESP** APK, [beta release](https://github.com/z2labs/SDRPlusPlus/releases/tag/esp-v0.1.0-beta) from the [z2labs/SDRPlusPlus](https://github.com/z2labs/SDRPlusPlus) fork (branch `esp-sdr`).
 
 ## Measurements
 
-**[docs/MEASUREMENTS.md](docs/MEASUREMENTS.md)**: 6 h VSG campaign plus receiver characterisation (VSG60, near field). In short: 0 CRC errors / gaps / lost samples over 5.6 h of soak, 300 retunes, 100 mode switches and 50 stop/start cycles; IQ passband 0.1 dB p-p, image -57 ... -70 dBc; 66 dB linear range; two-tone IM3 -54 dBc; ADEV 3.3e-9 @ 1 s; retune 80 ms.
+6-hour VSG campaign plus receiver characterisation (3 Oct 2026). Setup: ESP32-S3 with ESP-SDR, PCB antenna, Signal Hound VSG60 in the near field, so levels are relative; ratios, frequencies, stability and integrity counters are exact.
 
-Tips from the measurements: in spectrum mode use gain 40 or more; set the PPM after a few minutes of streaming (the board warms up by up to ~0.8 ppm); for strong signals at 250 kS/s (8-bit link) lower the gain or use 125 / 62.5 kS/s.
+| | Result |
+| --- | --- |
+| Integrity | **0 CRC errors, 0 gaps, 0 lost samples** in 5.6 h of soak (4.7 M frames, 1.5 G IQ samples) |
+| Stress | 300 random retunes, 100 IQ/spectrum mode switches, 50 stop/start cycles: 0 failures |
+| Retune | 80 ms median, 112 ms max; first sample already within 50 Hz |
+| IQ passband / image | 0.1 dB p-p within ±80 kHz (250 kS/s); image −57 … −70 dBc |
+| Linearity / IM3 | 66 dB linear range; two-tone IM3 −54 dBc |
+| Stability | ADEV 3.3e-9 @ 1 s; −0.07 … +0.04 ppm over 5.6 h after one PPM calibration |
+| Spectrum mode | all 18 profiles at 50 spectra/s; DC spike from +8 … +24 dB down to +0.6 dB with the module's fix |
+
+<table>
+<tr>
+<td><img src="docs/img/hw/long6h/W_soak.png" width="420"><br><sub>5.6 h soak: frequency, level, errors (zero)</sub></td>
+<td><img src="docs/img/hw/long6h/A_iq_sweep.png" width="420"><br><sub>IQ passband, frequency error and image across the band</sub></td>
+</tr>
+<tr>
+<td><img src="docs/img/hw/long6h/C_dc.png" width="420"><br><sub>Spectrum-mode centre: firmware default vs. module DC fix</sub></td>
+<td><img src="docs/img/hw/hwextra/T_adev.png" width="420"><br><sub>Allan deviation, 1 h gapless capture</sub></td>
+</tr>
+</table>
+
+Full report with all plots (tuning error map, gain curve, linearity, noise, phase noise, IMD3, blocking, latency, IQ imbalance vs. frequency): **[docs/MEASUREMENTS.md](docs/MEASUREMENTS.md)**
+
+Tips from the measurements: in spectrum mode use gain 40 or more; set the PPM after a few minutes of streaming; for strong signals at 250 kS/s (8-bit link) lower the gain or use 125 / 62.5 kS/s.
 
 ## Use
 
