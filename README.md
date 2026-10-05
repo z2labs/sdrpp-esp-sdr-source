@@ -24,6 +24,18 @@ The same module runs on Android in **SDR++ ESP**, a build of the [z2labs/SDRPlus
 
 Connect the board's **native USB** port (Espressif USB Serial/JTAG, 303A:1001; on devkits usually the one marked USB, not UART), start the app, allow USB access, then choose source **ESP-SDR (ESP32-S3)** and port **USB**.
 
+## FM broadcast band through an upconverter
+
+The S3 only tunes 2.2–2.8 GHz, but with a mixer in front it works as the IF stage of an upconverter. With the LO at 2259.1 MHz, Jazzy (90.9 MHz) lands at 2350 MHz, and the 40 MHz spectrum mode shows the whole FM band from about 71 to 111 MHz at once (5 Oct 2026):
+
+<img src="docs/img/fm_broadcast_band.png" alt="FM broadcast band seen through an upconverter by the ESP32-S3 in SDR++ (Spectrum 40 MHz mode)" width="860">
+
+| Station | RF | ESP32-S3 IF | LO |
+| --- | --- | --- | --- |
+| Jazzy | 90.9 MHz | 2350 MHz | 2259.1 MHz |
+
+To read the band directly in SDR++, set *Offset mode* to *Custom* and the offset to −LO. For listening, use IQ mode at 250 kS/s with WFM in the Radio module.
+
 ## Measurements
 
 6-hour VSG campaign plus receiver characterisation (3 Oct 2026). Setup: ESP32-S3 with ESP-SDR, PCB antenna, Signal Hound VSG60 in the near field, so levels are relative; ratios, frequencies, stability and integrity counters are exact.
