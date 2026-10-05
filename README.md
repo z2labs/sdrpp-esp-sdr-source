@@ -10,7 +10,15 @@ Native [SDR++](https://github.com/AlexandreRouma/SDRPlusPlus) source module for 
 - 2204–2804 MHz in 1 kHz steps, gain index 0–82, ppm correction
 - CRC and sample-index continuity checked on every frame, shown in the source menu
 
-For SDR#, Android or remote use over the network, see [esp-sdr-bridge](https://github.com/z2labs/esp-sdr-bridge) (SpyServer + rtl_tcp). Android with USB OTG and the spectrum mode: **SDR++ ESP** APK, [beta release](https://github.com/z2labs/SDRPlusPlus/releases/tag/esp-v0.1.0-beta) from the [z2labs/SDRPlusPlus](https://github.com/z2labs/SDRPlusPlus) fork (branch `esp-sdr`).
+For SDR#, Android or remote use over the network, see [esp-sdr-bridge](https://github.com/z2labs/esp-sdr-bridge) (SpyServer + rtl_tcp). On Android see [Android (USB OTG)](#android-usb-otg) below.
+
+## Android (USB OTG)
+
+<img src="docs/img/android_otg.jpg" alt="SDR++ ESP on an Android phone with an ESP32-S3 over USB OTG, 80 MHz spectrum" width="640">
+
+The same module runs on Android in **SDR++ ESP**, a build of the [z2labs/SDRPlusPlus](https://github.com/z2labs/SDRPlusPlus) fork (branch `esp-sdr`): IQ with demodulation and the 16 / 40 / 80 MHz spectrum mode, over a USB OTG cable, no PC. Download the APK from the [latest release](https://github.com/z2labs/SDRPlusPlus/releases/latest). It installs next to the official SDR++.
+
+Connect the board's **native USB** port (Espressif USB Serial/JTAG, 303A:1001; on devkits usually the one marked USB, not UART), start the app, allow USB access, then choose source **ESP-SDR (ESP32-S3)** and port **USB**.
 
 ## Measurements
 
