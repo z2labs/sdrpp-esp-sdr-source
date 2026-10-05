@@ -65,12 +65,21 @@ class ExtEmu:
     def set(self, wait=True, settle=0.0, **kw):
         self.cfg.update(kw); return 0.0
 
+    # the rest of the esp_sdr_emu interface that hwcampaign.py calls
+    def cmd(self, line): return "OK"
+    def start(self): return 0.0
+    def stop(self): pass
+    def stats(self): return dict(crc=0, gaps=0, lost=0, running=1, tune="")
+    def quit(self):
+        if hasattr(self, "bb"): self.bb.close()
+
     def raw(self, fc, secs, gain):
         fs = self.d["fs"]; n = int(fs * (secs + self.d["drop"])); path = self.a.raw
         if self.a.dut == "hackrf":
-            lna, vga = gain
+            lna, vga = gain[0], gain[1]
+            amp = gain[2] if len(gain) > 2 else 0          # optional 3rd element: front-end RF amp (+14 dB)
             cmd = ["hackrf_transfer", "-r", path, "-f", str(int(fc)), "-s", str(fs), "-n", str(n),
-                   "-l", str(lna), "-g", str(vga), "-a", "0"]
+                   "-l", str(lna), "-g", str(vga), "-a", str(int(amp))]
         else:
             cmd = ["rtl_sdr", "-f", str(int(fc)), "-s", str(fs), "-g", str(gain), "-n", str(n), path]
         subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=secs * 3 + 20, check=False)

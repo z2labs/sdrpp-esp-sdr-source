@@ -28,7 +28,7 @@ class Camp:
         self.a = a; os.makedirs(a.out, exist_ok=True)
         self.log = open(os.path.join(a.out, "results.jsonl"), "a", encoding="utf-8")
         self.tmp = os.path.join(a.out, "cap.bin")
-        self.v = VSG(); self.e = Emu(a.emu, a.port)
+        self.v = VSG(); self.e = self.new_emu()
         self.g62 = 50; self.g250 = 30; self.gsweep = 50
         self.notes = []
 
@@ -44,8 +44,14 @@ class Camp:
         except Exception: pass
         return p
 
+    def new_emu(self):
+        if self.a.dut == "esp32s3": return Emu(self.a.emu, self.a.port)
+        import pn_ext                      # HackRF / RTL-SDR / BB60C with the same campaign code
+        self.a.raw = os.path.join(self.a.out, "raw.bin"); return pn_ext.ExtEmu(self.a)
+
     def tune(self, f0, rate, gain, settle=0.4):
-        self.e.set(spec=0, rate=rate, freq=int(f0), gain=int(gain), ppm="0.000", settle=settle)
+        g = int(gain) if self.a.dut == "esp32s3" else gain
+        self.e.set(spec=0, rate=rate, freq=int(f0), gain=g, ppm="0.000", settle=settle)
 
     def cap(self, rate, secs, path=None):
         path = path or self.tmp
@@ -118,8 +124,8 @@ class Camp:
         f = np.fft.fftshift(f); S = np.fft.fftshift(S)
         return f, 10 * np.log10(S + 1e-30) - pc_db
 
-    def phase_c(self, freqs=FREQS, tag="C"):
-        curves = []
+    def phase_c(self, freqs=None, tag="C"):
+        freqs = freqs or FREQS; curves = []
         for f0 in freqs:
             for rate, secs, blk, nper, g in ((62500, 60, 3.0, 2 ** 15, self.g62), (250000, 20, 2.0, 2 ** 15, self.g250)):
                 off = OFF[rate]
@@ -152,11 +158,12 @@ class Camp:
         ax.semilogx(k, [hwpn.VSG60_PN_1G[o] + 20 * np.log10(2.35) for o in k], "kD--", ms=4, label="VSG60 typ. (scaled to 2.35 GHz)")
         ax.set_xlim(5, 1.2e5); ax.set_ylim(-130, -30); ax.grid(True, which="both", alpha=0.3)
         ax.set_xlabel("offset [Hz]"); ax.set_ylabel("L(f) [dBc/Hz]"); ax.legend(fontsize=8)
-        ax.set_title("ESP32-S3 conducted phase noise, %.0f dBm at input (dotted: VSG off floor)" % (P_LEVEL - self.a.atten))
+        ax.set_title(self.a.dut + " conducted phase noise, %.0f dBm at input (dotted: VSG off floor)" % (P_LEVEL - self.a.atten))
         self.show(fig, "%s_phase_noise.png" % tag)
 
     # ---------------- B: frequency stability ----------------
     def phase_b(self, secs):
+        if self.a.dut != "esp32s3": return self.phase_b_blocks(secs)
         f0, rate, off = 2350e6, 62500, OFF[62500]
         path = os.path.join(self.a.out, "stab.cf32")
         self.v.set(f=f0 + off, p=P_LEVEL, on=True)
@@ -197,6 +204,36 @@ class Camp:
         self.show(fig, "B_stability.png")
         self.say("B: %.0f s, offset %.0f Hz, p-p %.0f Hz, ADEV(1 s) %.1e, ADEV(100 s) %.1e, gaps %d" % (
             secs, fr.mean(), np.ptp(fr), np.interp(1, taus, adev), np.interp(100, taus, adev), s1["gaps"] - s0["gaps"]))
+
+
+    def phase_b_blocks(self, secs, blk=10.0):
+        """External receivers: 10 s captures back to back for `secs` (short gaps between them), 50 ms frequency
+        track inside each block; ADEV from the in-block data up to 2 s, block means show the slow drift."""
+        f0, rate, off = 2350e6, 62500, OFF[62500]
+        self.v.set(f=f0 + off, p=P_LEVEL, on=True); self.tune(f0, rate, self.g62, settle=0.3)
+        seg = rate // 20; t0 = time.time(); T, F, adev_acc = [], [], {}
+        while time.time() - t0 < secs:
+            x = self.cap(rate, blk); tb = time.time() - t0
+            fr = []
+            for i in range(len(x) // seg):
+                b = x[i * seg:(i + 1) * seg]; ft = hwpn.find_tone(b, rate, off, 8000)
+                fr.append(hwpn.refine_tone(b, rate, ft) - off)
+            fr = np.array(fr); T.extend(tb + np.arange(len(fr)) * seg / rate); F.extend(fr)
+            y = fr / f0; ph = np.concatenate([[0], np.cumsum(y) * seg / rate])
+            for m in (1, 2, 4, 8, 20, 40):
+                if 3 * m < len(ph):
+                    d = ph[2 * m:] - 2 * ph[m:-m] + ph[:-2 * m]
+                    adev_acc.setdefault(m, []).append(np.mean(d ** 2) / (2 * (m * seg / rate) ** 2))
+        self.v.set(on=False)
+        T, F = np.array(T), np.array(F)
+        taus = [m * seg / rate for m in sorted(adev_acc)]; adev = [float(np.sqrt(np.mean(adev_acc[m]))) for m in sorted(adev_acc)]
+        self.rec(test="B", secs=secs, f0=f0, mean_hz=float(F.mean()), pp_hz=float(np.ptp(F)), tau=taus, adev=adev, blocks=True)
+        fig, ax = plt.subplots(1, 2, figsize=(13, 4.8))
+        ax[0].plot(T / 60, F, ",", ms=1); ax[0].set_xlabel("time [min]"); ax[0].set_ylabel("tone offset [Hz] @ 2350 MHz"); ax[0].grid(alpha=0.3)
+        ax[0].set_title("%s frequency vs time (10 s blocks, 50 ms resolution)" % self.a.dut)
+        ax[1].loglog(taus, adev, "o-", ms=3); ax[1].set_xlabel("tau [s]"); ax[1].set_ylabel("Allan deviation"); ax[1].grid(True, which="both", alpha=0.3)
+        self.show(fig, "B_stability.png")
+        self.say("B (blocks): %.0f s, offset %.0f Hz, p-p %.0f Hz, ADEV(1 s) %.1e" % (secs, F.mean(), np.ptp(F), np.interp(1, taus, adev)))
 
     # ---------------- D / E: residual FM, NBFM SINAD vs level ----------------
     @staticmethod
@@ -265,7 +302,7 @@ class Camp:
         ax.axhline(12, color="k", lw=0.6, ls="--")
         ax.set_xlabel("level at S3 input [dBm]"); ax.grid(alpha=0.3); ax.legend(fontsize=8)
         ax.set_ylabel("SINAD [dB] (1 kHz, 3 kHz dev)" if fm else "S/N limit from residual FM, 3 kHz dev [dB]")
-        ax.set_title("NBFM %s vs level, gain %d" % ("SINAD" if fm else "residual-FM S/N", self.gsweep))
+        ax.set_title("%s NBFM %s vs level, gain %s" % (self.a.dut, "SINAD" if fm else "residual-FM S/N", self.gsweep))
         self.show(fig, "%s_nbfm.png" % tag)
 
     def guarded(self, name, fn, *args):
@@ -278,7 +315,7 @@ class Camp:
             try:
                 self.e.quit()
             except Exception: pass
-            time.sleep(2); self.e = Emu(self.a.emu, self.a.port)
+            time.sleep(2); self.e = self.new_emu()
             self.e.cmd("set spec=0 rate=62500 freq=2350000000 gain=30"); self.e.start(); self.e.cmd("sync 8")
 
     def close(self):
@@ -301,11 +338,17 @@ def main():
     ap.add_argument("--atten", type=float, required=True)
     ap.add_argument("--phases", default="AGCBDEc")
     ap.add_argument("--stab-secs", type=float, default=1200)
-    ap.add_argument("--gains", default=None, help="g62,g250,gsweep (skip A)")
+    ap.add_argument("--gains", default=None, help="g62,g250,gsweep (skip A); hackrf: lna:vga for all, e.g. 16:20")
+    ap.add_argument("--freqs", default=None, help="comma-separated Hz, default 2350e6,2480e6,2700e6")
+    ap.add_argument("--dut", default="esp32s3", choices=["esp32s3", "hackrf", "rtlsdr", "bb60c"])
     ap.add_argument("--levels", default=None, help="VSG sweep lo,hi,step in dBm, e.g. -120,-80,2")
     a = ap.parse_args()
     c = Camp(a)
-    if a.gains: c.g62, c.g250, c.gsweep = (int(v) for v in a.gains.split(","))
+    if a.gains and a.dut == "hackrf": c.g62 = c.g250 = c.gsweep = tuple(int(v) for v in a.gains.split(":"))
+    elif a.gains and a.dut in ("rtlsdr", "bb60c"): c.g62 = c.g250 = c.gsweep = float(a.gains)
+    elif a.gains: c.g62, c.g250, c.gsweep = (int(v) for v in a.gains.split(","))
+    global FREQS
+    if a.freqs: FREQS = tuple(float(v) for v in a.freqs.split(","))
     if a.levels:
         global LEVELS
         lo, hi, st = (float(v) for v in a.levels.split(","))
