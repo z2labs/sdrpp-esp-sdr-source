@@ -26,7 +26,7 @@ Connect the board's **native USB** port (Espressif USB Serial/JTAG, 303A:1001; o
 
 ## FM broadcast band through an upconverter
 
-The S3 only tunes 2.2–2.8 GHz, but with a mixer in front it works as the IF stage of an upconverter. With the LO at 2259.1 MHz, Jazzy (90.9 MHz) lands at 2350 MHz, and the 40 MHz spectrum mode shows the whole FM band from about 71 to 111 MHz at once (5 Oct 2026):
+The S3 only tunes 2.2–2.8 GHz, but with a mixer in front it works as the IF stage of an upconverter. Here the upconverter is a [moRFeus](https://www.crowdsupply.com/othernet/morfeus) (Othernet, Crowd Supply), a frequency converter and signal generator whose RF and hardware design was done by Zoltan Doczi as a consultant. With its LO at 2259.1 MHz, Jazzy (90.9 MHz) lands at 2350 MHz, and the 40 MHz spectrum mode shows the whole FM band from about 71 to 111 MHz at once (5 Oct 2026):
 
 <img src="docs/img/fm_broadcast_band.png" alt="FM broadcast band seen through an upconverter by the ESP32-S3 in SDR++ (Spectrum 40 MHz mode)" width="860">
 
