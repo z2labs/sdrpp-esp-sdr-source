@@ -14,6 +14,10 @@ For SDR#, Android or remote use over the network, see [esp-sdr-bridge](https://g
 
 ## Android (USB OTG)
 
+<a href="https://youtu.be/C4irjaCictg" target="_blank"><img src="docs/img/video_android.jpg" alt="Demo video: SDR++ ESP on Android with an ESP32-S3 over USB OTG (YouTube)" width="640"></a>
+
+*Demo video (YouTube): the ESP32-S3 on an Android phone over USB OTG, 80 MHz spectrum and IQ mode.*
+
 <img src="docs/img/android_otg.jpg" alt="SDR++ ESP on an Android phone with an ESP32-S3 over USB OTG, 80 MHz spectrum" width="640">
 
 The same module runs on Android in **SDR++ ESP**, a build of the [z2labs/SDRPlusPlus](https://github.com/z2labs/SDRPlusPlus) fork (branch `esp-sdr`): IQ with demodulation and the 16 / 40 / 80 MHz spectrum mode, over a USB OTG cable, no PC. Download the APK from the [latest release](https://github.com/z2labs/SDRPlusPlus/releases/latest). It installs next to the official SDR++.
