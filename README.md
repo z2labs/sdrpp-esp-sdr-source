@@ -10,6 +10,8 @@ Native [SDR++](https://github.com/AlexandreRouma/SDRPlusPlus) source module for 
 - 2204–2804 MHz in 1 kHz steps, gain index 0–82, ppm correction
 - CRC and sample-index continuity checked on every frame, shown in the source menu
 
+**Measured against a HackRF One on the same conducted chain** ([comparison](#compared-with-a-hackrf-one-6-oct-2026)): noise figure 10.9 dB vs 13 dB, NBFM 12 dB S/N at −115 dBm vs −113.5 dBm, phase noise at 1 kHz ≤ −86 vs −80 dBc/Hz, IQ image −56 … −65 vs −47 … −54 dBc. The HackRF keeps the higher strong-signal S/N (48 vs 42 dB) and handles strong nearby signals better.
+
 For SDR#, Android or remote use over the network, see [esp-sdr-bridge](https://github.com/z2labs/esp-sdr-bridge) (SpyServer + rtl_tcp). On Android see [Android (USB OTG)](#android-usb-otg) below.
 
 ## Download
@@ -56,7 +58,26 @@ To read the band directly in SDR++, set *Offset mode* to *Custom* and the offset
 
 ## Measurements
 
-6-hour VSG campaign plus receiver characterisation (3 Oct 2026). Setup: ESP32-S3 with ESP-SDR, PCB antenna, Signal Hound VSG60 in the near field, so levels are relative; ratios, frequencies, stability and integrity counters are exact.
+### Compared with a HackRF One (6 Oct 2026)
+
+On the same conducted chain as a HackRF One (TCXO) ([details](docs/MEASUREMENTS.md#comparison-esp32-s3-vs-hackrf-one-vs-bb60c)):
+
+| | ESP32-S3 | HackRF One |
+| --- | --- | --- |
+| Noise figure (2350 MHz) | 10.9 dB | 13 dB |
+| NBFM 12 dB S/N (2350 / 2700 MHz) | −115 / −111.6 dBm | −113.5 / −112.8 dBm |
+| Phase noise at 1 kHz | ≤ −86 dBc/Hz | −80 dBc/Hz |
+| IQ image | −56 … −65 dBc | −47 … −54 dBc |
+| Strong-signal S/N ceiling | 42 dB | 48 dB |
+| Blocking | saturates above ≈ −55 dBm within ±5 MHz at gain 70 | filtered beyond ±3 MHz at 2 MS/s |
+
+Same sensitivity; the S3 is cleaner close in, the HackRF handles strong nearby signals better.
+
+<img src="docs/img/hw/compare/s3_hackrf_bb60c.png" alt="ESP32-S3 vs HackRF One vs BB60C: phase noise and NBFM S/N" width="900">
+
+### 6-hour VSG campaign and receiver characterisation (3 Oct 2026)
+
+Setup: ESP32-S3 with ESP-SDR, PCB antenna, Signal Hound VSG60 in the near field, so levels are relative; ratios, frequencies, stability and integrity counters are exact.
 
 | | Result |
 | --- | --- |
@@ -107,23 +128,6 @@ Caveats:
 <td><img src="docs/img/hw/coax/B_stability.png" width="420"><br><sub>20 min frequency track and Allan deviation</sub></td>
 </tr>
 </table>
-
-### Compared with a HackRF One (6 Oct 2026)
-
-On the same conducted chain as a HackRF One (TCXO) ([details](docs/MEASUREMENTS.md#comparison-esp32-s3-vs-hackrf-one-vs-bb60c)):
-
-| | ESP32-S3 | HackRF One |
-| --- | --- | --- |
-| Noise figure (2350 MHz) | 10.9 dB | 13 dB |
-| NBFM 12 dB S/N (2350 / 2700 MHz) | −115 / −111.6 dBm | −113.5 / −112.8 dBm |
-| Phase noise at 1 kHz | ≤ −86 dBc/Hz | −80 dBc/Hz |
-| IQ image | −56 … −65 dBc | −47 … −54 dBc |
-| Strong-signal S/N ceiling | 42 dB | 48 dB |
-| Blocking | saturates above ≈ −55 dBm within ±5 MHz at gain 70 | filtered beyond ±3 MHz at 2 MS/s |
-
-Same sensitivity; the S3 is cleaner close in, the HackRF handles strong nearby signals better.
-
-<img src="docs/img/hw/compare/s3_hackrf_bb60c.png" alt="ESP32-S3 vs HackRF One vs BB60C: phase noise and NBFM S/N" width="900">
 
 Scripts: `tools/hwcampaign.py` (whole campaign, `--atten`, `--levels`), `tools/hwpn.py` (phase noise / residual FM / SINAD maths, `--selftest`), `tools/pn_ext.py` (the same tests on HackRF, RTL-SDR and BB60C), `tools/pn_compare.py`, `tools/hwfreqtrack.py`, `tools/hwimd.py` (noise figure vs gain, two-tone IMD3, blocking, IQ image / DC; `--dut hackrf`), `tools/imd_replot.py`.
 
