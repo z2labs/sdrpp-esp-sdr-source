@@ -316,3 +316,36 @@ Notes:
 VSG60 stepped from −50 to −120 dBm in 5 dB steps into a BB60C, tone power from 2 s IQ captures. Measured minus set is constant within ±0.1 dB over the whole range, also below the VSG60's specified −55 / −85 dBm limits. Cable alone: −1.3 dB; cable + 10 dB pad (the chain used for the S3): −11.2 dB.
 
 <img src="img/hw/coax/vsg_level_check.png" width="760">
+
+## Comparison: ESP32-S3 vs HackRF One vs BB60C
+
+Same conducted chain for all receivers: VSG60 → cable → 10 dB pad (11.2 dB total, checked with the BB60C); levels are at the receiver input. ESP32-S3 at 62.5 kS/s (16-bit link), gain 70, its frequency error corrected with the ppm setting before each test. HackRF One (TCXO; a clone whose RF amp is defective, so amp off) through `hackrf_transfer` at 2 MS/s, resampled to the same rates, LNA 40 / VGA 30 (its lowest-NF setting). BB60C as the phase-noise reference. 2480 MHz is disturbed for both receivers by local 2.4 GHz traffic and, on the S3, by a crystal harmonic (62 × 40 MHz).
+
+| | ESP32-S3 (gain 70) | HackRF One (LNA 40 / VGA 30) |
+| --- | --- | --- |
+| Noise figure, 2350 / 2700 MHz | **10.9 / 11.9 dB** | 13 / 13 dB (12.2 dB at LNA 40 / VGA 40) |
+| NBFM 12 dB S/N, 2350 / 2700 MHz | **−115** / −111.6 dBm | −113.5 / **−112.8** dBm |
+| Strong-signal S/N ceiling (NBFM) | 42 dB (1.3 / 2.6 kHz spurs) | **48 dB** |
+| L(f) 100 Hz / 1 kHz / 10 kHz, 2350 MHz | **−70 / −86 / −90 dBc/Hz** (VSG-limited above ~300 Hz) | −65 / −80 / −84 dBc/Hz |
+| Two-tone IM3 (20 kHz spacing) | below the VSG60's own −53 dBc until hard clipping: tone ≈ −64 dBm at gain 70, ≈ −45 dBm at gain 50; IIP3 > −2 dBm at gain 30 | below −53 dBc up to the ADC limit; IIP3 > −18 / −10 / −3 / −2 dBm at LNA 40 / 32 / 24 / 16 |
+| Blocking (CW blocker, ±0.2 … ±5 MHz) | saturates above ≈ −55 dBm total input at gain 70 (+18 … 20 dB noise), threshold moves 1 dB per gain step | 2 MS/s: ≤ 2.4 dB beyond ±3 MHz even at −25 dBm; inside the baseband filter the ADC clips from ≈ −41 dBm |
+| Reciprocal mixing at 200 kHz | ≈ +13 dB noise with a −61 dBm blocker | ≈ +7 dB (−92 dBc/Hz) |
+| IQ image, 2230–2780 MHz | **−56 … −65 dBc** | −47 … −54 dBc |
+| DC spike over the noise (±200 Hz) | **3 … 24 dB** | ≈ 49 dB |
+| Tuning error | −1.9 … −1.6 ppm (bare 40 MHz crystal, plus ~2.5 kHz warm-up after the stream starts) | **+0.90 … +0.92 ppm** (TCXO) |
+| Frequency drift | 97 Hz p-p in 20 min | ≈ 60 Hz p-p in 60 min |
+
+In short: the two receivers have the same sensitivity within 1.5 dB. The S3 has lower close-in phase noise, better image rejection and a much smaller DC spike. The HackRF has the higher strong-signal S/N and far better blocking, because its baseband filter protects the 8-bit ADC, while the S3 at high fixed gain saturates on any signal above about −55 dBm within ±5 MHz (a Wi-Fi receiver would use its AGC here). With strong signals nearby, lower the S3 gain.
+
+Notes on method:
+- NF from the gain method: CW gain calibration, then the noise density with the VSG off, referred to the receiver input (the 11.2 dB pad at 290 K is the source), median of the periodogram +1.59 dB. On the S3 the mean is not usable because of its own spurs (−6.7 / −8.8 kHz and DC).
+- IMD3: the VSG60 multitone has its own IM3 at −53 dBc (Signal Hound quotes typically −50 dBc); neither receiver rose above it before clipping, so IIP3 is a lower bound. An exact IIP3 needs two generators and a combiner.
+- The HackRF's ±2 MHz blocking peak is a sampling artefact (aliasing at 2 MS/s), not receiver data.
+
+![ESP32-S3 vs HackRF One vs BB60C](img/hw/compare/s3_hackrf_bb60c.png)
+![S3 noise figure](img/hw/compare/s3_noise_figure.png) ![HackRF NF grid](img/hw/compare/hackrf_nf_grid.png)
+![S3 IMD3](img/hw/compare/s3_imd3.png) ![HackRF IMD3](img/hw/compare/hackrf_imd3.png)
+![S3 blocking, gain 70](img/hw/compare/s3_blocking_gain70.png) ![S3 blocking, gain 50](img/hw/compare/s3_blocking_gain50.png)
+![HackRF blocking 2 MS/s](img/hw/compare/hackrf_blocking_2msps.png) ![HackRF blocking 10 MS/s](img/hw/compare/hackrf_blocking_10msps.png)
+![S3 image / DC](img/hw/compare/s3_image_dc.png) ![HackRF image / DC](img/hw/compare/hackrf_image_dc.png)
+![HackRF NBFM, LNA 40](img/hw/compare/hackrf_nbfm_lna40.png) ![HackRF phase noise](img/hw/compare/hackrf_phase_noise.png)
