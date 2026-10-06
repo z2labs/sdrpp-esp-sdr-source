@@ -33,6 +33,32 @@ def band_pow(P, fx, f):
 
 
 class Imd(Camp):
+    ppm = {}                                          # per-frequency ppm correction found by lock()
+
+    def tune(self, f0, rate, gain, settle=0.4):
+        g = int(gain) if self.a.dut == "esp32s3" else gain
+        self.e.set(spec=0, rate=rate, freq=int(f0), gain=g, ppm="%.3f" % self.ppm.get(f0, 0.0), settle=settle)
+
+    def lock(self, f0, g):
+        """S3 only: find the frequency error with a CW at +0.2 * rate (searched over the whole band) and correct it
+        with the ppm setting, so the test tones land where the analysis expects them (error -1.8 ppm, plus warm-up)."""
+        if self.a.dut != "esp32s3": return
+        off = 0.2 * RATE
+
+        def meas(ppm):
+            self.ppm[f0] = ppm; self.tune(f0, RATE, g)
+            self.vset(f=f0 + off, p=-70, on=True); time.sleep(0.2)
+            P, fx = psd(self.cap(RATE, 0.5)); k = (np.abs(fx) > 500) & (np.abs(fx) < 0.45 * RATE)
+            return float(fx[k][np.argmax(P[k])] - off)
+        p0 = self.ppm.get(f0, 0.0); err = meas(p0)
+        if abs(err) > 150:
+            d = err / f0 * 1e6
+            e1 = meas(p0 + d)
+            if abs(e1) > abs(err): e1 = meas(p0 - d)       # the emulator's ppm sign is the other way round
+            err = e1
+        self.vset(on=False)
+        self.say("lock %.0f MHz: ppm %.3f, residual %.0f Hz" % (f0 / 1e6, self.ppm.get(f0, 0.0), err))
+
     def cap(self, rate, secs, path=None):
         for attempt in range(3):                      # the S3 link can drop a capture right after a retune: retry
             x = Camp.cap(self, rate, secs, path)
@@ -64,6 +90,7 @@ class Imd(Camp):
         return band_pow(P, fx, fpk) - (p_vsg - self.a.atten), float(np.max(np.abs(x)))
 
     def phase_i(self, f0):
+        self.lock(f0, 60)
         lo, hi, st = self.a.ilevels
         levels = np.arange(lo, min(hi, self.a.vsg_max) + 0.01, abs(st))      # weak -> strong, stops at ADC clipping
         fig, axs = plt.subplots(1, len(self.gains), figsize=(4.6 * len(self.gains), 4.6), squeeze=False)
@@ -122,6 +149,7 @@ class Imd(Camp):
         recip = excess noise density relative to the blocker [dBc/Hz] (reciprocal mixing, or the VSG's own far-out noise)."""
         g = self.parse_gain(self.a.kgain) if self.a.kgain else self.gains[0]
         plev = sorted(min(float(v), self.a.vsg_max) for v in self.a.klevels.split(","))
+        self.lock(f0, 60)
         self.tune(f0, RATE, g)
         cal, _ = self.cw_cal(f0, g, self.a.cal_p)
         self.vset(on=False); time.sleep(0.1)
@@ -168,6 +196,7 @@ class Imd(Camp):
         the source is the 11.2 dB pad (290 K) in front of the VSG. Clip level = CW input that would reach ADC full scale."""
         rows = []
         for f0 in freqs:
+            self.lock(f0, 60)
             for g in self.gains:
                 self.tune(f0, RATE, g)
                 cal, _ = self.cw_cal(f0, g, self.a.cal_p)
@@ -202,6 +231,7 @@ class Imd(Camp):
         DC = power within +-200 Hz of 0 Hz with the VSG off, relative to the in-band noise in the same window."""
         g = self.gains[0]; rows = []
         for f0 in np.arange(f_lo, f_hi + 1, step):
+            f0 = float(f0); self.lock(f0, g)
             self.tune(f0, RATE, g)
             self.vset(on=False); time.sleep(0.1)
             x = self.cap(RATE, 0.5); P, fx = psd(x)
@@ -255,14 +285,15 @@ def main():
     ap.add_argument("--klevels", default="-50,-40,-30,-20,-14", help="blocker VSG levels")
     ap.add_argument("--freqs", default="2350e6", help="phase N frequencies, comma-separated Hz")
     ap.add_argument("--rate", type=int, default=250000, help="IQ rate; 62500 = the S3's 16-bit link (tones then at +5 / +15 kHz)")
+    ap.add_argument("--warmup", type=float, default=60.0, help="S3: seconds of streaming before the first measurement")
     ap.add_argument("--hackrf-fs", type=float, default=None, help="HackRF native rate (default 2 MS/s; 10e6 keeps blockers <= 5 MHz from aliasing in)")
     a = ap.parse_args()
     a.ilevels = [float(v) for v in a.ilevels.split(",")]
     global RATE, CFO, SP
     RATE = a.rate
-    # 62.5k (S3 16-bit link): tones at +8 / +18 kHz, IM3 at -2 / +28 kHz. The S3 receives everything ~4.9 kHz low,
-    # so the tones land at ~3 / 13 kHz, clear of DC (VSG60 multitone needs >= 10 kHz spacing)
-    if RATE < 100000: CFO, SP = 13e3, 10e3
+    # 62.5k (S3 16-bit link): tones at +5 / +15 kHz, IM3 at -5 / +25 kHz (VSG60 multitone needs >= 10 kHz spacing);
+    # lock() corrects the S3's frequency error first, so they land there
+    if RATE < 100000: CFO, SP = 10e3, 10e3
     if a.hackrf_fs:
         import pn_ext
         pn_ext.DUTS["hackrf"]["fs"] = int(a.hackrf_fs)
@@ -272,6 +303,7 @@ def main():
     try:
         if a.dut == "esp32s3":
             c.e.cmd("set spec=0 rate=%d freq=%d gain=%d" % (RATE, a.f0, c.gains[0])); c.e.start(); c.e.cmd("sync 8")
+            c.say("S3 warm-up: streaming %d s before measuring" % a.warmup); time.sleep(a.warmup)
         if "I" in a.phases: c.phase_i(a.f0)
         if "K" in a.phases: c.phase_k(a.f0)
         if "N" in a.phases: c.phase_n([float(v) for v in a.freqs.split(",")])
