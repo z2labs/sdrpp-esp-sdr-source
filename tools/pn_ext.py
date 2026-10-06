@@ -97,6 +97,7 @@ class ExtEmu:
             return True, len(y), 0.0, 0
         fs = self.d["fs"]; D = fs // rate
         x = self.raw(self.cfg["freq"], n / rate + 0.05, self.cfg["gain"])
+        self.peak_raw = float(max(np.max(np.abs(x.real)), np.max(np.abs(x.imag))))   # ADC peak before decimation
         y = signal.resample_poly(x, 1, D)[: n]                  # FIR decimation to the S3 rate
         y.astype(np.complex64).tofile(path)
         return True, len(y), 0.0, 0
