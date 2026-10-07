@@ -308,9 +308,16 @@ void Client::startStream(const Settings& s) {
 
 void Client::worker() {
     uint8_t b[65536];
+    // Every retune stops and restarts the IQ stream (any host byte ends a run), which costs a
+    // short gap. Dragging the frequency axis sends a new frequency every frame, and applying
+    // each one at once kept the stream restarting back to back: no audio at all while tuning.
+    // While streaming, apply at most one change per MIN_RETUNE (the latest one wins).
+    const auto MIN_RETUNE = std::chrono::milliseconds(350);
+    auto lastApply = std::chrono::steady_clock::now() - MIN_RETUNE;
     while (run) {
         bool apply = false; Settings s; uint64_t seq = 0;
-        {
+        auto now = std::chrono::steady_clock::now();
+        if (!streaming || now - lastApply >= MIN_RETUNE) {
             std::lock_guard<std::mutex> l(mtx);
             if (dirty) { s = want; seq = wantSeq; dirty = false; apply = true; }
         }
@@ -318,6 +325,7 @@ void Client::worker() {
             if (streaming) stopStream();
             startStream(s);
             appliedSeq = seq;
+            lastApply = std::chrono::steady_clock::now();
         }
         int n = port.read(b, sizeof(b));
         if (n < 0) { run = false; break; }   // device unplugged
