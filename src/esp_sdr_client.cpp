@@ -134,7 +134,14 @@ bool SerialPort::setBaud(int baud) {
     if (fd < 0) return false;
     termios t{};
     if (tcgetattr(fd, &t) < 0) return false;
-    speed_t sp = baud >= 921600 ? B921600 : baud >= 460800 ? B460800 : baud >= 230400 ? B230400 : B115200;
+    speed_t sp = B115200;
+    if (baud >= 230400) sp = B230400;
+#ifdef B460800
+    if (baud >= 460800) sp = B460800;
+#endif
+#ifdef B921600
+    if (baud >= 921600) sp = B921600;
+#endif
     cfsetispeed(&t, sp); cfsetospeed(&t, sp);
     return tcsetattr(fd, TCSANOW, &t) == 0;
 }
