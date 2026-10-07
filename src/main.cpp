@@ -2,6 +2,10 @@
 // Firmware: ESP-SDR with the IQS stream (ESPARGOS/esp-sdr, ESP32-S3 target).
 // Turbo Mode developed by Zoltan Doczi from https://www.z2labs.io
 #include "esp_sdr_client.h"
+#include "esp_flasher.h"
+#include <gui/main_window.h>
+#include <atomic>
+#include <thread>
 #include <imgui.h>
 #include <utils/flog.h>
 #include <module.h>
@@ -74,6 +78,16 @@ public:
         config.release();
         refreshPorts();
 
+        // Firmware shipped with SDR++ (res/esp_sdr_fw): offered when the dongle has none, an
+        // older one, or one that does not answer as ESP-SDR
+        std::string fwErr;
+        core::configManager.acquire();
+        std::string resDir = core::configManager.conf["resourcesDirectory"];
+        core::configManager.release();
+        haveBundle = bundle.load(resDir + "/esp_sdr_fw", fwErr);
+        if (haveBundle) { flog::info("ESP-SDR: bundled firmware {} ({})", bundle.buildTimestamp, bundle.revision); }
+        else { flog::warn("ESP-SDR: {}", fwErr); }
+
         handler.ctx = this;
         handler.selectHandler = menuSelected;
         handler.deselectHandler = menuDeselected;
@@ -91,6 +105,7 @@ public:
 
     ~ESPSDRSourceModule() {
         gui::waterfall.onFFTRedraw.unbindHandler(&fftRedrawHandler);
+        if (flashThread.joinable()) { flashThread.join(); }
         stop(this);
         sigpath::sourceManager.unregisterSource("ESP-SDR (ESP32-S3)");
     }
@@ -155,7 +170,7 @@ private:
 
     static void start(void* ctx) {
         ESPSDRSourceModule* _this = (ESPSDRSourceModule*)ctx;
-        if (_this->running) { return; }
+        if (_this->running || _this->flashing) { return; }
         _this->stream.clearWriteStop();
         std::string err;
         espsdr::SpectrumCallback scb = nullptr;
@@ -335,6 +350,9 @@ private:
         else {
             SmGui::Text("Tunes 2204-2804 MHz (PLL lock range), 1 kHz steps");
         }
+        // Firmware update / install
+        _this->drawFirmwareUpdate();
+
         // Dongle firmware (known after the first start)
         if (!_this->lastFirmware.empty()) {
             std::string fwText = "Firmware: " + _this->lastFirmware;
@@ -410,6 +428,118 @@ private:
     dsp::stream<dsp::complex_t> stream;
     SourceManager::SourceHandler handler;
     espsdr::Client client;
+
+    // ---- firmware update (ROM bootloader over the same USB port) ----
+    espsdr::FirmwareBundle bundle;
+    bool haveBundle = false;
+    std::atomic<bool> flashing{false};
+    std::thread flashThread;
+    std::mutex flashMtx;
+    std::string flashStage, flashResult;
+    float flashFrac = 0.0f;
+    double confirmUntil = 0.0;
+
+    // Does the dongle need the bundled firmware? (known after a start attempt)
+    bool firmwareOutdated() {
+        if (!haveBundle) { return false; }
+        if (error.find("no ESP-SDR firmware") != std::string::npos) { return true; }
+        if (lastFirmware.rfind("old", 0) == 0) { return true; }
+        std::string b = client.firmwareBuild();
+        return !b.empty() && !bundle.buildTimestamp.empty() && b < bundle.buildTimestamp;
+    }
+
+    void startFlash() {
+        if (flashing) { return; }
+        if (flashThread.joinable()) { flashThread.join(); }
+        if (running) { gui::mainWindow.setPlayState(false); }
+        flashing = true;
+        gui::mainWindow.usbAutoStartPaused = true;
+        { std::lock_guard<std::mutex> l(flashMtx); flashStage = "Starting"; flashFrac = 0; flashResult.clear(); }
+        flashThread = std::thread([this] {
+            std::string err, portName = port;
+            espsdr::SerialPort sp;
+            bool ok = false;
+#ifdef __ANDROID__
+            int vid = 0, pid = 0;
+            int fd = backend::getDeviceFD(vid, pid, ESP_VIDPIDS);
+            if (fd < 0) { err = "connect the ESP32-S3 (USB / JTAG port) first"; }
+            portName = "fd:" + std::to_string(fd);
+            auto reopen = [fd](espsdr::SerialPort& p, std::string& e) {
+                // The board re-enumerates in its ROM bootloader: wait for Android to hand over the
+                // new device (the user may have to allow USB access again)
+                for (int i = 0; i < 120; i++) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                    int v = 0, pi = 0;
+                    int nfd = backend::getDeviceFD(v, pi, ESP_VIDPIDS);
+                    if (nfd >= 0 && nfd != fd) { return p.open("fd:" + std::to_string(nfd), e); }
+                }
+                e = "the board did not come back in its bootloader (allow USB access if Android asks)";
+                return false;
+            };
+#else
+            auto reopen = [portName](espsdr::SerialPort& p, std::string& e) {
+                for (int i = 0; i < 40; i++) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+                    if (p.open(portName, e)) { return true; }
+                }
+                return false;
+            };
+#endif
+            if (err.empty() && sp.open(portName, err)) {
+                espsdr::Flasher f;
+                ok = f.flash(sp, true, bundle.images, reopen, [this](const std::string& s, float frac) {
+                    std::lock_guard<std::mutex> l(flashMtx);
+                    flashStage = s; flashFrac = frac;
+                }, err);
+            }
+            sp.close();
+            {
+                std::lock_guard<std::mutex> l(flashMtx);
+                flashResult = ok ? "Firmware " + bundle.buildDate + " installed. The board restarts and SDR++ starts it."
+                                 : "Firmware update failed: " + err;
+            }
+            flog::info("ESP-SDR: {}", ok ? "firmware installed" : "firmware update failed: " + err);
+            if (ok) { error.clear(); lastFirmware.clear(); }
+            gui::mainWindow.usbAutoStartPaused = false;
+            flashing = false;
+        });
+    }
+
+    void drawFirmwareUpdate() {
+        if (!haveBundle) { return; }
+        if (flashing) {
+            std::lock_guard<std::mutex> l(flashMtx);
+            ImGui::TextUnformatted(flashStage.c_str());
+            ImGui::ProgressBar(flashFrac, ImVec2(-FLT_MIN, 0));
+            ImGui::TextDisabled("Keep the board connected. Allow USB access if Android asks.");
+            return;
+        }
+        {
+            std::lock_guard<std::mutex> l(flashMtx);
+            if (!flashResult.empty()) {
+                bool ok = flashResult.rfind("Firmware update failed", 0) != 0;
+                ImGui::PushTextWrapPos(0.0f);
+                ImGui::TextColored(ok ? ImVec4(0.4f, 0.9f, 0.4f, 1.0f) : ImVec4(1.0f, 0.4f, 0.3f, 1.0f), "%s", flashResult.c_str());
+                ImGui::PopTextWrapPos();
+            }
+        }
+        bool outdated = firmwareOutdated();
+        double now = ImGui::GetTime();
+        std::string label = (outdated ? "Install firmware " : "Reinstall firmware ") + bundle.buildDate;
+        if (now < confirmUntil) { label = "Tap again to flash the board"; }
+        if (outdated) {
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.75f, 0.45f, 0.05f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.85f, 0.55f, 0.10f, 1.0f));
+        }
+        if (ImGui::Button((label + "##_espsdr_flash").c_str(), ImVec2(-FLT_MIN, 0))) {
+            if (now < confirmUntil) { confirmUntil = 0; startFlash(); }
+            else { confirmUntil = now + 5.0; }
+        }
+        if (outdated) {
+            ImGui::PopStyleColor(2);
+            ImGui::TextDisabled("This board needs the ESP-SDR firmware that comes with SDR++.");
+        }
+    }
     double freq = DEFAULT_HZ;
     std::string port;
     std::vector<std::string> ports;
