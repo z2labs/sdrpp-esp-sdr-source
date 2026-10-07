@@ -178,11 +178,24 @@ bool Client::start(const std::string& name, const Settings& s, SampleCallback ca
     if (!port.open(name, error)) return false;
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
     port.flushInput();
-    // Make sure no stream is still running from an earlier session, then check the firmware
-    port.write("\n");
-    std::this_thread::sleep_for(std::chrono::milliseconds(300));
-    port.flushInput();
-    if (!command("CAPS", "CAPS", 1500)) { error = "no ESP-SDR firmware answering on " + name; port.close(); return false; }
+    // Make sure no stream is still running from an earlier session (an 80 MHz SPEC run keeps
+    // sending for a while after the stop byte): stop, then wait for the line to go quiet
+    bool capsOk = false;
+    for (int attempt = 0; attempt < 3 && !capsOk; attempt++) {
+        port.write("\n");
+        uint8_t junk[16384];
+        auto quietSince = std::chrono::steady_clock::now();
+        auto giveUp = quietSince + std::chrono::seconds(3);
+        while (std::chrono::steady_clock::now() < giveUp) {
+            int n = port.read(junk, sizeof(junk));
+            if (n < 0) break;
+            if (n > 0) quietSince = std::chrono::steady_clock::now();
+            else if (std::chrono::steady_clock::now() - quietSince > std::chrono::milliseconds(250)) break;
+        }
+        port.flushInput();
+        capsOk = command("CAPS", "CAPS", 1500);
+    }
+    if (!capsOk) { error = "no ESP-SDR firmware answering on " + name; port.close(); return false; }
     std::string caps = reply + " ";
     bool hasSpec = caps.find(" SPEC ") != std::string::npos || caps.find(" SPEC") != std::string::npos;
     hasIqTune = caps.find(" IQTUNE ") != std::string::npos;

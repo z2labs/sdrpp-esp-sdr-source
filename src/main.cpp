@@ -474,15 +474,27 @@ private:
             if (fd < 0) { err = "connect the ESP32-S3 (USB / JTAG port) first"; }
             portName = "fd:" + std::to_string(fd);
             auto reopen = [fd](espsdr::SerialPort& p, std::string& e) {
-                // The board re-enumerates in its ROM bootloader: wait for Android to hand over the
-                // new device (the user may have to allow USB access again)
-                for (int i = 0; i < 120; i++) {
+                // The board re-enumerates in its ROM bootloader: wait for Android to report it gone,
+                // then for the new device (the user may have to allow USB access again).
+                // Without a detach within 4 s the reset did not re-enumerate: try the same fd.
+                bool gone = false;
+                for (int i = 0; i < 300; i++) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(100));
                     int v = 0, pi = 0;
                     int nfd = backend::getDeviceFD(v, pi, ESP_VIDPIDS);
-                    if (nfd >= 0 && nfd != fd) { return p.open("fd:" + std::to_string(nfd), e); }
+                    if (nfd < 0 && !gone) { gone = true; flog::info("ESP-SDR flash: board left the bus ({:.1f} s)", i * 0.1); }
+                    if (nfd >= 0 && (gone || nfd != fd)) {
+                        flog::info("ESP-SDR flash: board is back as fd {} after {:.1f} s", nfd, i * 0.1);
+                        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+                        return p.open("fd:" + std::to_string(nfd), e);
+                    }
+                    if (!gone && i == 40) {
+                        flog::warn("ESP-SDR flash: no re-enumeration after the reset, trying the same fd {}", fd);
+                        return p.open("fd:" + std::to_string(fd), e);
+                    }
                 }
-                e = "the board did not come back in its bootloader (allow USB access if Android asks)";
+                e = std::string(gone ? "the board left the bus but did not come back (allow USB access if Android asks)"
+                                     : "the board did not reset into its bootloader");
                 return false;
             };
 #else
@@ -496,8 +508,10 @@ private:
 #endif
             if (err.empty() && sp.open(portName, err)) {
                 espsdr::Flasher f;
+                flog::info("ESP-SDR flash: start on {} ({} images)", portName, bundle.images.size());
                 ok = f.flash(sp, true, bundle.images, reopen, [this](const std::string& s, float frac) {
                     std::lock_guard<std::mutex> l(flashMtx);
+                    if (s != flashStage) { flog::info("ESP-SDR flash: {} ({:.0f} %)", s, frac * 100.0f); }
                     flashStage = s; flashFrac = frac;
                 }, err);
             }
