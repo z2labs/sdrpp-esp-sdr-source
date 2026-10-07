@@ -260,7 +260,8 @@ private:
     static void menuHandler(void* ctx) {
         ESPSDRSourceModule* _this = (ESPSDRSourceModule*)ctx;
 
-        if (_this->running) { SmGui::BeginDisabled(); }
+        // Nothing greys out while running: a change here restarts the stream
+        bool restart = false;
         SmGui::FillWidth();
         SmGui::ForceSync();
         if (SmGui::Combo(CONCAT("##_espsdr_port_", _this->name), &_this->portId, _this->portsTxt.c_str())) {
@@ -269,6 +270,7 @@ private:
                 config.acquire();
                 config.conf["port"] = _this->port;
                 config.release(true);
+                restart = true;
             }
         }
         SmGui::FillWidth();
@@ -282,6 +284,7 @@ private:
                 config.acquire();
                 config.conf["modeId"] = _this->modeId;
                 config.release(true);
+                restart = true;
             }
         }
         if (MODES[_this->modeId] == 0) {
@@ -292,6 +295,7 @@ private:
                 config.acquire();
                 config.conf["rateId"] = _this->rateId;
                 config.release(true);
+                restart = true;
             }
         }
         else {
@@ -301,14 +305,19 @@ private:
                 config.acquire();
                 config.conf["binsId"] = _this->binsId;
                 config.release(true);
+                restart = true;
             }
             if (SmGui::Checkbox(CONCAT("Max hold##_espsdr_mh_", _this->name), &_this->maxHold)) {
                 config.acquire();
                 config.conf["maxHold"] = _this->maxHold;
                 config.release(true);
+                restart = true;
             }
         }
-        if (_this->running) { SmGui::EndDisabled(); }
+        if (restart && _this->running) {
+            stop(_this);
+            start(_this);
+        }
 
         SmGui::LeftLabel("Gain");
         SmGui::FillWidth();
