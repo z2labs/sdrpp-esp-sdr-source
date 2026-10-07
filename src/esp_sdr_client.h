@@ -24,6 +24,10 @@ public:
     int read(uint8_t* buf, int len);   // waits at most ~50 ms; <0 on error
     bool write(const std::string& s);
     void flushInput();
+    // Modem lines (CDC SET_CONTROL_LINE_STATE on Android): the firmware flasher uses them to
+    // reset the chip into its ROM bootloader. setBaud: UART bridges only (USB-JTAG ignores it).
+    bool setLines(bool dtr, bool rts);
+    bool setBaud(int baud);
     static std::vector<std::string> list();
 #ifdef __ANDROID__
     // Android has no /dev/ttyACM for apps: CDC-ACM over libusb on the fd the USB permission gave us
@@ -79,6 +83,11 @@ public:
     bool running() const { return run; }
     Stats stats;
     std::string lastTune() { std::lock_guard<std::mutex> l(mtx); return tuneInfo; }
+    // Firmware identity from VERSION? ("2026-10-07 8fdf468"), or a note for firmware
+    // without it; empty until connected. smoothTuning(): firmware retunes inside the stream.
+    std::string firmwareInfo() { std::lock_guard<std::mutex> l(mtx); return fwInfo; }
+    std::string firmwareBuild() { std::lock_guard<std::mutex> l(mtx); return fwBuild; }
+    bool smoothTuning() const { return hasIqTune; }
 
     static constexpr uint64_t FMIN = 2204000000ull, FMAX = 2804000000ull;
     static int linkBits(int rate) { return rate >= 250000 ? 8 : 16; }
@@ -109,6 +118,9 @@ private:
     uint64_t wantSeq = 0;
     std::atomic<uint64_t> appliedSeq{0};
     std::string tuneInfo;
+    std::string fwInfo, fwBuild;     // fwBuild: UTC build timestamp from VERSION?, "" if unknown
+    std::atomic<bool> hasIqTune{false};
+    void loPlan(const Settings& s, int& mhz, int& khz, double& resid);
     std::vector<uint8_t> buf;
     std::vector<float> out;
     uint64_t nextIdx = 0; bool haveNext = false;

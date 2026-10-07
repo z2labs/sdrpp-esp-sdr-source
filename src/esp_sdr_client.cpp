@@ -15,6 +15,7 @@ static constexpr double kTwoPi = 6.283185307179586;
 #include <termios.h>
 #include <unistd.h>
 #include <poll.h>
+#include <sys/ioctl.h>
 #endif
 
 namespace espsdr {
@@ -72,6 +73,20 @@ bool SerialPort::write(const std::string& s) {
     return WriteFile((HANDLE)h, s.data(), (DWORD)s.size(), &n, NULL) && n == s.size();
 }
 void SerialPort::flushInput() { PurgeComm((HANDLE)h, PURGE_RXCLEAR); }
+bool SerialPort::setLines(bool dtr, bool rts) {
+    if (!h) return false;
+    bool a = EscapeCommFunction((HANDLE)h, dtr ? SETDTR : CLRDTR);
+    bool b = EscapeCommFunction((HANDLE)h, rts ? SETRTS : CLRRTS);
+    return a && b;
+}
+bool SerialPort::setBaud(int baud) {
+    if (!h) return false;
+    DCB dcb{};
+    dcb.DCBlength = sizeof(dcb);
+    if (!GetCommState((HANDLE)h, &dcb)) return false;
+    dcb.BaudRate = (DWORD)baud;
+    return SetCommState((HANDLE)h, &dcb);
+}
 std::vector<std::string> SerialPort::list() {
     std::vector<std::string> r;
     char target[512];
@@ -107,6 +122,22 @@ int SerialPort::read(uint8_t* b, int len) {
 }
 bool SerialPort::write(const std::string& s) { return ::write(fd, s.data(), s.size()) == (ssize_t)s.size(); }
 void SerialPort::flushInput() { tcflush(fd, TCIFLUSH); }
+bool SerialPort::setLines(bool dtr, bool rts) {
+    if (fd < 0) return false;
+    int bits = 0;
+    if (ioctl(fd, TIOCMGET, &bits) < 0) return false;
+    bits = dtr ? (bits | TIOCM_DTR) : (bits & ~TIOCM_DTR);
+    bits = rts ? (bits | TIOCM_RTS) : (bits & ~TIOCM_RTS);
+    return ioctl(fd, TIOCMSET, &bits) == 0;
+}
+bool SerialPort::setBaud(int baud) {
+    if (fd < 0) return false;
+    termios t{};
+    if (tcgetattr(fd, &t) < 0) return false;
+    speed_t sp = baud >= 921600 ? B921600 : baud >= 460800 ? B460800 : baud >= 230400 ? B230400 : B115200;
+    cfsetispeed(&t, sp); cfsetospeed(&t, sp);
+    return tcsetattr(fd, TCSANOW, &t) == 0;
+}
 std::vector<std::string> SerialPort::list() {
     std::vector<std::string> r;
     glob_t g{};
@@ -145,7 +176,30 @@ bool Client::start(const std::string& name, const Settings& s, SampleCallback ca
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
     port.flushInput();
     if (!command("CAPS", "CAPS", 1500)) { error = "no ESP-SDR firmware answering on " + name; port.close(); return false; }
-    bool hasSpec = reply.find(" SPEC") != std::string::npos;
+    std::string caps = reply + " ";
+    bool hasSpec = caps.find(" SPEC ") != std::string::npos || caps.find(" SPEC") != std::string::npos;
+    hasIqTune = caps.find(" IQTUNE ") != std::string::npos;
+    {
+        std::string info = "old firmware (no version info)", build;
+        if (caps.find(" VERSION ") != std::string::npos && command("VERSION?", "VERSION", 1500)) {
+            // VERSION {"revision":"<sha>[-dirty]","build_date":"...","build_timestamp":"...","profile":"..."}
+            auto field = [this](const char* key) {
+                std::string k = std::string("\"") + key + "\":\"";
+                size_t a = reply.find(k);
+                if (a == std::string::npos) return std::string();
+                a += k.size();
+                size_t e = reply.find('"', a);
+                return e == std::string::npos ? std::string() : reply.substr(a, e - a);
+            };
+            std::string rev = field("revision"), date = field("build_date");
+            build = field("build_timestamp");
+            info = (date.empty() ? std::string("?") : date) + " " + rev.substr(0, std::min<size_t>(7, rev.size()));
+            if (rev.find("-dirty") != std::string::npos) info += "+";
+        }
+        std::lock_guard<std::mutex> l(mtx);
+        fwInfo = info + (hasIqTune ? ", smooth tuning" : "");
+        fwBuild = build;
+    }
     specInfo = (hasSpec && command("SPECINFO?", "SPECINFO", 1500)) ? reply : std::string();
     if (s.specRate && !hasSpec) { error = "this firmware has no SPEC (spectrum) mode"; port.close(); return false; }
     cb = callback;
@@ -239,6 +293,15 @@ bool Client::specProfile(int rate, int bins, int& code, int& stride, int& upf) {
     return false;
 }
 
+// LO fs/4 (4 MHz) below the wanted frequency in 1 kHz steps; resid: what the host NCO shifts
+void Client::loPlan(const Settings& s, int& mhz, int& khz, double& resid) {
+    int64_t fk = (int64_t)std::llround(double(s.freqHz) * (1.0 - s.ppm * 1e-6) / 1e3);
+    fk = std::max<int64_t>(FMIN / 1000, std::min<int64_t>(FMAX / 1000, fk));
+    int64_t lo = fk - 4000;
+    mhz = (int)(lo / 1000); khz = (int)(lo % 1000);
+    resid = double(s.freqHz) * (1.0 - s.ppm * 1e-6) - 4e6 - double(lo) * 1e3;
+}
+
 void Client::startStream(const Settings& s) {
     int64_t fk = (int64_t)std::llround(double(s.freqHz) * (1.0 - s.ppm * 1e-6) / 1e3);
     fk = std::max<int64_t>(FMIN / 1000, std::min<int64_t>(FMAX / 1000, fk));
@@ -317,13 +380,31 @@ void Client::worker() {
     while (run) {
         bool apply = false; Settings s; uint64_t seq = 0;
         auto now = std::chrono::steady_clock::now();
-        if (!streaming || now - lastApply >= MIN_RETUNE) {
+        if (!streaming || now - lastApply >= (hasIqTune ? std::chrono::milliseconds(15) : MIN_RETUNE)) {
             std::lock_guard<std::mutex> l(mtx);
             if (dirty) { s = want; seq = wantSeq; dirty = false; apply = true; }
         }
         if (apply) {
-            if (streaming) stopStream();
-            startStream(s);
+            Settings f = s; f.freqHz = cur.freqHz;
+            if (streaming && hasIqTune && !cur.specRate && !s.specRate && !(f != cur)) {
+                // Only the frequency changed and the firmware retunes inside the stream:
+                // no restart, no gap (RTL-SDR-like smooth tuning)
+                int mhz, khz; double resid;
+                loPlan(s, mhz, khz, resid);
+                port.write("T " + std::to_string(mhz) + " " + std::to_string(khz) + "\n");
+                ncoStep = std::fabs(resid) < 1000 ? -kTwoPi * resid / s.rate : 0;
+                cur = s;
+                stats.retunes++;
+                {
+                    std::lock_guard<std::mutex> l(mtx);
+                    tuneInfo = "LO " + std::to_string(mhz) + " MHz + " + std::to_string(khz) + " kHz, " +
+                               std::to_string(s.rate / 1000.0).substr(0, 5) + " kS/s, smooth";
+                }
+            }
+            else {
+                if (streaming) stopStream();
+                startStream(s);
+            }
             appliedSeq = seq;
             lastApply = std::chrono::steady_clock::now();
         }

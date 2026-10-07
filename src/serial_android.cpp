@@ -160,6 +160,15 @@ void SerialPort::flushInput() {
     u->ring.clear(); u->head = 0;
 }
 
+bool SerialPort::setLines(bool dtr, bool rts) {
+    Usb* u = usb;
+    if (!u || u->ifComm < 0) return false;
+    uint16_t v = (uint16_t)((dtr ? 1 : 0) | (rts ? 2 : 0));
+    return libusb_control_transfer(u->h, 0x21, 0x22, v, (uint16_t)u->ifComm, nullptr, 0, 500) >= 0;
+}
+
+bool SerialPort::setBaud(int) { return true; }   // USB Serial/JTAG: no baud rate
+
 std::vector<std::string> SerialPort::list() { return {"USB"}; }
 
 } // namespace espsdr

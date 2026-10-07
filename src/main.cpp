@@ -328,10 +328,22 @@ private:
                          (unsigned long long)st.gaps.load());
                 SmGui::Text(buf);
                 SmGui::Text(_this->client.lastTune().c_str());
+                std::string fw = _this->client.firmwareInfo();
+                if (!fw.empty()) { _this->lastFirmware = fw; }
             }
         }
         else {
             SmGui::Text("Tunes 2204-2804 MHz (PLL lock range), 1 kHz steps");
+        }
+        // Dongle firmware (known after the first start)
+        if (!_this->lastFirmware.empty()) {
+            std::string fwText = "Firmware: " + _this->lastFirmware;
+            if (_this->lastFirmware.rfind("old", 0) == 0) {
+                SmGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), fwText.c_str());
+            }
+            else {
+                SmGui::Text(fwText.c_str());
+            }
         }
     }
 
@@ -389,6 +401,7 @@ private:
     std::string name;
     bool enabled = true;
     bool running = false;
+    std::string lastFirmware;   // dongle firmware seen on the last start (shown in the menu)
     bool selected = false;
     double pendingTuneHz = 0;
     bool pendingRestore = false;
