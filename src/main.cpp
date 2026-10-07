@@ -9,6 +9,8 @@
 #include <signal_path/signal_path.h>
 #include <core.h>
 #include <gui/smgui.h>
+#include <gui/tuner.h>
+#include <algorithm>
 #include <gui/style.h>
 #include <config.h>
 #include <cstring>
@@ -19,6 +21,16 @@ static const std::vector<backend::DevVIDPID> ESP_VIDPIDS = {{0x303A, 0x1001}};
 #endif
 
 #define CONCAT(a, b) ((std::string(a) + b).c_str())
+
+// Tuning range. Measured (VSG60 CW sweep 0.15-6 GHz, 2026-10-01): the S3's PLL locks with the
+// LO between 2196 and 2806 MHz, with hard edges and no reception outside. In IQ mode the LO sits
+// 4 MHz below the wanted frequency and the firmware accepts LO 2200-2800 MHz, hence 2204-2804 MHz.
+static const double TUNE_MIN_HZ = 2204e6, TUNE_MAX_HZ = 2804e6;
+// RF range with measured front-end response; outside it is shaded on the spectrum
+static const double RF_MIN_HZ = 2200e6, RF_MAX_HZ = 2800e6;
+// 2.4 GHz ISM band (marked on the spectrum); first start tunes to its centre
+static const double ISM_MIN_HZ = 2400e6, ISM_MAX_HZ = 2483.5e6;
+static const double DEFAULT_HZ = 2441.75e6;
 
 SDRPP_MOD_INFO{
     /* Name:            */ "esp_sdr_source",
@@ -71,9 +83,14 @@ public:
         handler.tuneHandler = tune;
         handler.stream = &stream;
         sigpath::sourceManager.registerSource("ESP-SDR (ESP32-S3)", &handler);
+
+        fftRedrawHandler.ctx = this;
+        fftRedrawHandler.handler = fftRedraw;
+        gui::waterfall.onFFTRedraw.bindHandler(&fftRedrawHandler);
     }
 
     ~ESPSDRSourceModule() {
+        gui::waterfall.onFFTRedraw.unbindHandler(&fftRedrawHandler);
         stop(this);
         sigpath::sourceManager.unregisterSource("ESP-SDR (ESP32-S3)");
     }
@@ -112,12 +129,27 @@ private:
 
     static void menuSelected(void* ctx) {
         ESPSDRSourceModule* _this = (ESPSDRSourceModule*)ctx;
+        _this->selected = true;
+        // Coming from another SDR (or a fresh install at the generic default): go back to where
+        // this receiver was last used, or to the middle of the 2.4 GHz band
+        double cf = gui::waterfall.getCenterFrequency();
+        if (cf < TUNE_MIN_HZ || cf > TUNE_MAX_HZ) {
+            double last = DEFAULT_HZ;
+            config.acquire();
+            if (config.conf.contains("lastFreq")) { last = config.conf["lastFreq"]; }
+            config.release();
+            _this->pendingTuneHz = std::clamp<double>(last, TUNE_MIN_HZ, TUNE_MAX_HZ);
+            _this->pendingRestore = true;
+        }
         core::setInputSampleRate(_this->inputRate());
         flog::info("ESPSDRSourceModule '{0}': Menu Select!", _this->name);
     }
 
     static void menuDeselected(void* ctx) {
         ESPSDRSourceModule* _this = (ESPSDRSourceModule*)ctx;
+        _this->selected = false;
+        _this->pendingTuneHz = 0;
+        _this->pendingRestore = false;
         flog::info("ESPSDRSourceModule '{0}': Menu Deselect!", _this->name);
     }
 
@@ -188,6 +220,23 @@ private:
 
     static void tune(double freq, void* ctx) {
         ESPSDRSourceModule* _this = (ESPSDRSourceModule*)ctx;
+        // Outside the PLL lock range the chip cannot receive at all: stay at the edge, and put the
+        // GUI (frequency display, scale) back on the frequency that is really tuned (next frame)
+        double f = std::clamp<double>(freq, TUNE_MIN_HZ, TUNE_MAX_HZ);
+        if (f != freq && _this->pendingRestore) {
+            // Start right after selecting this source still carries the previous SDR's frequency:
+            // use the restored one, no warning
+            f = _this->pendingTuneHz;
+        }
+        else if (f != freq) {
+            _this->pendingTuneHz = f;
+            _this->limitNoticeUntil = ImGui::GetTime() + 4.0;
+            flog::warn("ESP-SDR: {0:.0f} Hz is outside the tuning range, using {1:.0f} Hz", freq, f);
+        }
+        freq = f;
+        config.acquire();
+        config.conf["lastFreq"] = freq;
+        config.release(true);
         _this->freq = freq;
         if (_this->running) { _this->client.update(_this->settings()); }
         flog::info("ESPSDRSourceModule '{0}': Tune: {1}!", _this->name, freq);
@@ -282,17 +331,73 @@ private:
             }
         }
         else {
-            SmGui::Text("2204-2804 MHz, 1 kHz steps");
+            SmGui::Text("Tunes 2204-2804 MHz (PLL lock range), 1 kHz steps");
+        }
+    }
+
+    // Spectrum overlay (GUI thread): applies a pending re-tune, shades the frequencies outside the
+    // receiver's measured range, marks the 2.4 GHz ISM band and shows the out-of-range notice.
+    static void fftRedraw(ImGui::WaterFall::FFTRedrawArgs args, void* ctx) {
+        ESPSDRSourceModule* _this = (ESPSDRSourceModule*)ctx;
+        if (!_this->selected) { return; }
+        if (_this->pendingTuneHz > 0) {
+            double f = _this->pendingTuneHz;
+            _this->pendingTuneHz = 0;
+            _this->pendingRestore = false;
+            tuner::centerTuning(gui::waterfall.selectedVFO, f);
+            core::configManager.acquire();
+            core::configManager.conf["frequency"] = f;
+            core::configManager.release(true);
+        }
+
+        ImDrawList* dl = args.window->DrawList;
+        auto toX = [&args](double hz) { return (float)(args.min.x + (hz - args.lowFreq) * args.freqToPixelRatio); };
+        float s = style::uiScale;
+        if (args.lowFreq < RF_MIN_HZ) {
+            float x = std::min<float>(toX(RF_MIN_HZ), args.max.x);
+            dl->AddRectFilled(args.min, ImVec2(x, args.max.y), IM_COL32(140, 0, 0, 60));
+            if (x < args.max.x) { dl->AddLine(ImVec2(x, args.min.y), ImVec2(x, args.max.y), IM_COL32(255, 60, 60, 200), 2.0f * s); }
+        }
+        if (args.highFreq > RF_MAX_HZ) {
+            float x = std::max<float>(toX(RF_MAX_HZ), args.min.x);
+            dl->AddRectFilled(ImVec2(x, args.min.y), args.max, IM_COL32(140, 0, 0, 60));
+            if (x > args.min.x) { dl->AddLine(ImVec2(x, args.min.y), ImVec2(x, args.max.y), IM_COL32(255, 60, 60, 200), 2.0f * s); }
+        }
+        const double ism[2] = { ISM_MIN_HZ, ISM_MAX_HZ };
+        for (double e : ism) {
+            if (e <= args.lowFreq || e >= args.highFreq) { continue; }
+            float x = toX(e);
+            dl->AddLine(ImVec2(x, args.min.y), ImVec2(x, args.max.y), IM_COL32(255, 200, 0, 110), 1.0f * s);
+        }
+        if (ISM_MAX_HZ > args.lowFreq && ISM_MIN_HZ < args.highFreq) {
+            float x0 = std::max<float>(toX(ISM_MIN_HZ), args.min.x), x1 = std::min<float>(toX(ISM_MAX_HZ), args.max.x);
+            const char* lbl = "2.4 GHz ISM";
+            ImVec2 ts = ImGui::CalcTextSize(lbl);
+            if (x1 - x0 > ts.x + 8.0f * s) {
+                dl->AddText(ImVec2((x0 + x1 - ts.x) / 2.0f, args.max.y - ts.y - 2.0f * s), IM_COL32(255, 200, 0, 170), lbl); // bottom: the band plan uses the top
+            }
+        }
+        if (ImGui::GetTime() < _this->limitNoticeUntil) {
+            const char* msg = "ESP32-S3 tunes 2204 - 2804 MHz only";
+            ImVec2 ts = ImGui::CalcTextSize(msg);
+            ImVec2 p((args.min.x + args.max.x - ts.x) / 2.0f, args.min.y + (args.max.y - args.min.y) / 2.0f - ts.y / 2.0f);
+            dl->AddRectFilled(ImVec2(p.x - 10.0f * s, p.y - 6.0f * s), ImVec2(p.x + ts.x + 10.0f * s, p.y + ts.y + 6.0f * s), IM_COL32(120, 0, 0, 220), 6.0f * s);
+            dl->AddText(p, IM_COL32(255, 255, 255, 255), msg);
         }
     }
 
     std::string name;
     bool enabled = true;
     bool running = false;
+    bool selected = false;
+    double pendingTuneHz = 0;
+    bool pendingRestore = false;
+    double limitNoticeUntil = 0;
+    EventHandler<ImGui::WaterFall::FFTRedrawArgs> fftRedrawHandler;
     dsp::stream<dsp::complex_t> stream;
     SourceManager::SourceHandler handler;
     espsdr::Client client;
-    double freq = 2450e6;
+    double freq = DEFAULT_HZ;
     std::string port;
     std::vector<std::string> ports;
     std::string portsTxt;
