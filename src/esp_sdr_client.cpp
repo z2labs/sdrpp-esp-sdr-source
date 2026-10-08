@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 
 static constexpr double kTwoPi = 6.283185307179586;
@@ -236,10 +237,8 @@ bool Client::start(const std::string& name, const Settings& s, SampleCallback ca
 }
 
 void Client::stop() {
-    if (run) {
-        run = false;
-        if (thr.joinable()) thr.join();
-    }
+    run = false;   // the worker may have ended by itself (unplugged): still join it
+    if (thr.joinable()) thr.join();
     if (port.isOpen()) {
         if (streaming) stopStream();
         if (cur.specRate) { command("BANDWIDTH 20", "OK", 800); command("DC 1", "", 800); }
@@ -355,6 +354,7 @@ void Client::startStream(const Settings& s) {
         }
         specFs = s.specRate; specBins = s.bins;
         buf.clear();
+        textTail.clear();
         streaming = true; fresh = true; haveNext = false;
         cur = s;
         stats.retunes++;
@@ -385,6 +385,7 @@ void Client::startStream(const Settings& s) {
                    std::to_string(s.rate / 1000.0).substr(0, 5) + " kS/s, " + std::to_string(bits) + "-bit link";
     }
     buf.clear();
+    textTail.clear();
     streaming = true; fresh = true; haveNext = false;
     cur = s;
     stats.retunes++;
@@ -432,9 +433,57 @@ void Client::worker() {
         int n = port.read(b, sizeof(b));
         if (n < 0) { run = false; break; }   // device unplugged
         if (n == 0) continue;
+        if (streaming && checkRunEnd(b, n)) {
+            // The firmware ended the run by itself (ring overrun, e.g. a retune that took too
+            // long): start a new one with the current settings instead of going silent
+            streaming = false;
+            auto t = std::chrono::steady_clock::now();
+            if (t - endBurstStart > std::chrono::seconds(5)) { endBurstStart = t; endBurst = 0; }
+            if (++endBurst > 5) {
+                if (log) log("the stream keeps ending, giving up");
+                run = false;
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            port.flushInput();
+            startStream(cur);
+            continue;
+        }
         buf.insert(buf.end(), b, b + n);
         if (cur.specRate) parseSpec(); else parse();
     }
+}
+
+// End-of-run report: "<IQSEND|SPECEND> status detail units pairs elapsed_us late_max work_max
+// frames drops abandoned ffts stopped_by_host retunes retune_max_cycles"
+bool Client::checkRunEnd(const uint8_t* b, int n) {
+    textTail.append((const char*)b, n);
+    if (textTail.size() > 512) textTail.erase(0, textTail.size() - 512);
+    const char* tag = cur.specRate ? "SPECEND " : "IQSEND ";
+    size_t p = textTail.rfind(tag);
+    if (p == std::string::npos) return false;
+    size_t e = textTail.find('\n', p);
+    if (e == std::string::npos) return false;
+    std::string line = textTail.substr(p, e - p);
+    textTail.clear();
+    unsigned long v[15] = {0};
+    const char* c = line.c_str() + strlen(tag);
+    int k = 0;
+    for (; k < 15; k++) {
+        char* end;
+        v[k] = strtoul(c, &end, 10);
+        if (end == c) break;
+        c = end;
+    }
+    if (k < 2) return false;   // not a report (binary data that happened to match)
+    stats.runEnds++;
+    unsigned long retunes = k > 13 ? v[13] : 0;
+    if (log) log("firmware ended the stream: " + line);
+    if (!cur.specRate && hasIqTune && retunes > 0 && v[0] != 0 && ++tuneFailures >= 2) {
+        hasIqTune = false;
+        if (log) log("in-stream retune disabled for this session (the stream ended after retunes twice)");
+    }
+    return true;
 }
 
 // SPC1: magic, u32 frame, u64 pair index, u32 pairs, u16 ffts, u8 flags, u8 gain, u16 drops,

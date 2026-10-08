@@ -40,6 +40,19 @@ The same module runs on Android in **SDR++ ESP**, a build of the [z2labs/SDRPlus
 
 Connect the board's **native USB** port (Espressif USB Serial/JTAG, 303A:1001; on devkits usually the one marked USB, not UART), start the app, allow USB access, then choose source **ESP-SDR (ESP32-S3)** and port **USB**.
 
+### Firmware updates over USB
+
+SDR++ ESP carries the matching ESP-SDR firmware and installs it on the board itself, over the same USB cable: no PC, no esptool, no ESP-IDF.
+
+- After a start, the source menu shows the board's firmware (`Firmware: <build date> <revision>`).
+- If the board has no ESP-SDR firmware, an older one, or something else entirely, the menu shows an orange **Install firmware &lt;date&gt;** button. Otherwise the same button reads **Reinstall firmware &lt;date&gt;**.
+- Tap it, then tap again within 5 s to confirm. A progress bar shows the steps. A full install takes about 15 s. Keep the board connected until it says *installed*.
+- When it is done, the board restarts with the new firmware and SDR++ starts streaming. If the stream does not come up, unplug and replug the board once.
+
+How it works: SDR++ resets the chip into its ROM serial bootloader through the USB Serial/JTAG port (the same DTR/RTS sequence esptool uses), writes the bootloader, partition table and application, verifies each image by MD5, and then restarts the chip. The ROM bootloader is in mask ROM, so an interrupted install can always be repeated. If the board no longer shows up at all, hold **BOOT** while plugging it in, then tap **Install firmware** again.
+
+This needs the board's **native USB** port. If the board is plugged into its UART port (a USB-UART bridge such as CH343, CP210x or FTDI), Android SDR++ shows a notice to move the cable to the other port. The same button works in the desktop builds, on the port selected in the menu.
+
 ## FM broadcast band through an upconverter
 
 <a href="https://youtu.be/WVA4J9Fg5GE" target="_blank"><img src="docs/img/video_fm.jpg" alt="Demo video: FM broadcast reception with an ESP32-S3 behind a moRFeus upconverter (YouTube)" width="640"></a>

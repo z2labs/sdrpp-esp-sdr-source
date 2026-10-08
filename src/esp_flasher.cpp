@@ -239,8 +239,22 @@ void Flasher::resetToBootloader(bool usbJtag) {
     }
 }
 
+bool Flasher::writeReg(uint32_t addr, uint32_t value, uint32_t mask, int timeoutMs) {
+    std::vector<uint8_t> d;
+    put32(d, addr); put32(d, value); put32(d, mask); put32(d, 0);
+    return command(0x09, d, 0, timeoutMs);
+}
+
 void Flasher::hardReset(bool usbJtag) {
-    (void)usbJtag;
+    if (usbJtag) {
+        // Entering the ROM loader over USB Serial/JTAG latches "force download boot": an RTS
+        // reset would land in the loader again. Clear it first, as esptool does for the S3
+        // (RTC_CNTL_OPTION1_REG bit 0), then reset with IO0 (DTR) released.
+        writeReg(0x6000812C, 0, 0x1, 500);
+        port->setLines(false, true); sleepMs(200);
+        port->setLines(false, false); sleepMs(200);
+        return;
+    }
     port->setLines(false, true); sleepMs(100);   // RTS: reset with IO0 high -> runs the new firmware
     port->setLines(false, false);
 }

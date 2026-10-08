@@ -98,6 +98,7 @@ public:
         handler.stream = &stream;
         sigpath::sourceManager.registerSource("ESP-SDR (ESP32-S3)", &handler);
 
+        client.log = [this](const std::string& m) { flog::warn("ESP-SDR: {}", m); };
         fftRedrawHandler.ctx = this;
         fftRedrawHandler.handler = fftRedraw;
         gui::waterfall.onFFTRedraw.bindHandler(&fftRedrawHandler);
@@ -387,9 +388,9 @@ private:
             else {
                 char buf[256];
                 auto& st = _this->client.stats;
-                snprintf(buf, sizeof(buf), "frames %llu  crc %llu  gaps %llu",
+                snprintf(buf, sizeof(buf), "frames %llu  crc %llu  gaps %llu  restarts %llu",
                          (unsigned long long)st.frames.load(), (unsigned long long)st.crcErrors.load(),
-                         (unsigned long long)st.gaps.load());
+                         (unsigned long long)st.gaps.load(), (unsigned long long)st.runEnds.load());
                 SmGui::Text(buf);
                 SmGui::Text(_this->client.lastTune().c_str());
                 std::string fw = _this->client.firmwareInfo();
@@ -571,6 +572,12 @@ private:
             if (ok) { error.clear(); lastFirmware.clear(); }
             gui::mainWindow.usbAutoStartPaused = false;
             flashing = false;
+            if (ok) {
+                // Let the new firmware boot, then start the stream (same USB handle; if the board
+                // re-enumerates instead, the USB auto-start picks up the new one)
+                std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+                gui::mainWindow.startRequested = true;
+            }
         });
     }
 

@@ -2,6 +2,7 @@
 // No SDR++ dependency, so the CLI test tool can use it on its own.
 #pragma once
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <functional>
@@ -63,6 +64,7 @@ struct Settings {
 
 struct Stats {
     std::atomic<uint64_t> frames{0}, samples{0}, crcErrors{0}, gaps{0}, lost{0}, retunes{0};
+    std::atomic<uint64_t> runEnds{0};   // the firmware ended a stream on its own (restarted)
 };
 
 // Samples are delivered as interleaved float I/Q, full scale +-1.0 (int16 FIR units / 32768),
@@ -83,6 +85,8 @@ public:
     bool running() const { return run; }
     // A start() running on another thread gives up soon (true), or may run normally again (false)
     void cancelStart(bool c) { cancel = c; }
+    // Diagnostics (worker thread): unexpected stream ends, fallbacks
+    std::function<void(const std::string&)> log;
     Stats stats;
     std::string lastTune() { std::lock_guard<std::mutex> l(mtx); return tuneInfo; }
     // Firmware identity from VERSION? ("2026-10-07 8fdf468"), or a note for firmware
@@ -123,6 +127,11 @@ private:
     std::string tuneInfo;
     std::string fwInfo, fwBuild;     // fwBuild: UTC build timestamp from VERSION?, "" if unknown
     std::atomic<bool> hasIqTune{false};
+    std::string textTail;            // last raw bytes, to spot the firmware's end-of-run report
+    int tuneFailures = 0;            // stream ends right after an in-stream retune
+    int endBurst = 0;                // stream ends in a row (restart loop guard)
+    std::chrono::steady_clock::time_point endBurstStart{};
+    bool checkRunEnd(const uint8_t* b, int n);
     void loPlan(const Settings& s, int& mhz, int& khz, double& resid);
     std::vector<uint8_t> buf;
     std::vector<float> out;

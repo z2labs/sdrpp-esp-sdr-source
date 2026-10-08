@@ -51,6 +51,7 @@ private:
     bool sync();
     void resetToBootloader(bool usbJtag);
     void hardReset(bool usbJtag);
+    bool writeReg(uint32_t addr, uint32_t value, uint32_t mask, int timeoutMs);
 
     SerialPort* port = nullptr;
     std::vector<uint8_t> rx;    // bytes received but not yet framed
