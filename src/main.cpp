@@ -694,8 +694,8 @@ private:
     bool hotplugPrimed = false;
     std::vector<std::string> lastEspPorts;
     int rateId = 0;
-    int modeId = 0;
-    int binsId = 0;
+    int modeId = NMODES - 1;   // the widest on-chip spectrum (80 MHz) when the core supports it
+    int binsId = 2;            // 2048 bins
     bool maxHold = false;
     int gain = 60;
     float ppm = 0.0f;
