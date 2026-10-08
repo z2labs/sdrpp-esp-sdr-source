@@ -51,7 +51,9 @@ SDR++ ESP carries the matching ESP-SDR firmware and installs it on the board its
 
 How it works: SDR++ resets the chip into its ROM serial bootloader through the USB Serial/JTAG port (the same DTR/RTS sequence esptool uses), writes the bootloader, partition table and application, verifies each image by MD5, and then restarts the chip. The ROM bootloader is in mask ROM, so an interrupted install can always be repeated. If the board no longer shows up at all, hold **BOOT** while plugging it in, then tap **Install firmware** again.
 
-This needs the board's **native USB** port. If the board is plugged into its UART port (a USB-UART bridge such as CH343, CP210x or FTDI), Android SDR++ shows a notice to move the cable to the other port. The same button works in the desktop builds, on the port selected in the menu.
+On Android this needs the board's **native USB** port. If the board is plugged into its UART port (a USB-UART bridge such as CH343, CP210x or FTDI), SDR++ shows a notice to move the cable to the other port.
+
+The desktop builds (Windows, macOS, Linux) have the same button. It flashes the board on the port selected in the source menu. There the board may also be on its UART port: if the native-USB reset gets no answer, SDR++ tries the DevKit's EN / IO0 auto-reset as well, and on Windows and Linux it raises the loader to 460800 baud for the transfer. On Linux the port needs the usual access rights (for example membership in the `dialout` group), the same as for streaming.
 
 ## FM broadcast band through an upconverter
 

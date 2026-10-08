@@ -278,7 +278,35 @@ bool Flasher::flash(SerialPort& p, bool usbJtag, const std::vector<FlashImage>& 
     }
     rx.clear();
     prog("Connecting to the bootloader", 0.02f);
-    if (!sync()) return fail("bootloader");
+    if (!sync()) {
+        if (!usbJtag) return fail("bootloader");
+        // Desktop: the selected port may be a DevKit's UART port (USB-UART bridge with the
+        // EN / IO0 auto-reset transistors) instead of the native USB: try that reset too
+        prog("Connecting to the bootloader (UART port)", 0.03f);
+        usbJtag = false;
+        p.setBaud(115200);
+        resetToBootloader(false);
+        rx.clear();
+        if (!sync()) return fail("bootloader");
+    }
+#if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
+    if (!usbJtag) {
+        // The ROM loader talks 115200 on a UART: 1.2 MB of firmware would take almost two
+        // minutes. CHANGE_BAUDRATE (new, 0 = ROM loader) to 460800, then follow on this side.
+        std::vector<uint8_t> b;
+        put32(b, 460800); put32(b, 0);
+        if (command(0x0F, b, 0, 1000) && p.setBaud(460800)) {
+            sleepMs(50);
+            uint8_t junk[256];
+            while (port->read(junk, sizeof(junk)) > 0) {}
+            rx.clear();
+        }
+        else {
+            p.setBaud(115200);
+            lastError.clear();
+        }
+    }
+#endif
 
     // Flash access: SPI_ATTACH (default pins) and the flash geometry the images were built for
     std::vector<uint8_t> d;
