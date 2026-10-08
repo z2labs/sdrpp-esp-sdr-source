@@ -633,7 +633,7 @@ private:
             sp.close();
             {
                 std::lock_guard<std::mutex> l(flashMtx);
-                flashResult = ok ? "Firmware " + bundle.buildDate + " installed. The board restarts and SDR++ starts it."
+                flashResult = ok ? "Firmware " + bundle.buildDate + " installed. The board restarts and the stream starts."
                                  : "Firmware update failed: " + err;
             }
             flog::info("ESP-SDR: {}", ok ? "firmware installed" : "firmware update failed: " + err);
@@ -681,7 +681,7 @@ private:
         }
         if (outdated) {
             ImGui::PopStyleColor(2);
-            ImGui::TextDisabled("This board needs the ESP-SDR firmware that comes with SDR++.");
+            ImGui::TextDisabled("This board needs the ESP-SDR firmware that comes with this app.");
         }
     }
     double freq = DEFAULT_HZ;
