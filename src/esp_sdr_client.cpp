@@ -56,7 +56,9 @@ bool SerialPort::open(const std::string& name, std::string& error) {
     dcb.DCBlength = sizeof(dcb);
     GetCommState(hp, &dcb);
     dcb.BaudRate = 2000000; dcb.ByteSize = 8; dcb.Parity = NOPARITY; dcb.StopBits = ONESTOPBIT;
-    dcb.fBinary = TRUE; dcb.fDtrControl = DTR_CONTROL_ENABLE; dcb.fRtsControl = RTS_CONTROL_ENABLE;
+    // DTR/RTS stay deasserted: on the ESP32-S3 USB-JTAG port (and on a UART auto-reset circuit)
+    // these lines drive reset / boot mode, and asserting them can reboot the board into the ROM loader.
+    dcb.fBinary = TRUE; dcb.fDtrControl = DTR_CONTROL_DISABLE; dcb.fRtsControl = RTS_CONTROL_DISABLE;
     dcb.fOutxCtsFlow = FALSE; dcb.fOutxDsrFlow = FALSE; dcb.fOutX = FALSE; dcb.fInX = FALSE;
     SetCommState(hp, &dcb);
     COMMTIMEOUTS t{};
@@ -143,6 +145,10 @@ bool SerialPort::open(const std::string& name, std::string& error) {
     cfmakeraw(&t);
     t.c_cc[VMIN] = 0; t.c_cc[VTIME] = 0;
     tcsetattr(f, TCSANOW, &t);
+    // The tty layer raises DTR/RTS on open. Drop both in one call (dropping DTR first would leave
+    // RTS alone asserted, which resets an ESP32-S3 on its USB-JTAG port).
+    int mbits = 0;
+    if (ioctl(f, TIOCMGET, &mbits) == 0) { mbits &= ~(TIOCM_DTR | TIOCM_RTS); ioctl(f, TIOCMSET, &mbits); }
     fd = f;
     return true;
 }
