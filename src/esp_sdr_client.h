@@ -30,6 +30,8 @@ public:
     bool setLines(bool dtr, bool rts);
     bool setBaud(int baud);
     static std::vector<std::string> list();
+    // USB vendor / product of a serial port (desktop: Windows SetupAPI, Linux sysfs); 0 if unknown
+    static int usbId(const std::string& name, int& pid);
 #ifdef __ANDROID__
     // Android has no /dev/ttyACM for apps: CDC-ACM over libusb on the fd the USB permission gave us
     struct Usb;

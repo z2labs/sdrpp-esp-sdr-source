@@ -16,7 +16,7 @@ jobs:
           run: sudo apt-get update -q && sudo apt-get install -y -q g++-mingw-w64-x86-64-posix
         - name: Build
           run: |
-            x86_64-w64-mingw32-g++-posix -Os -s -std=c++17 -static -Isrc tools/esp_flash_cli.cpp src/esp_flasher.cpp src/esp_sdr_client.cpp -o esp_flash_cli.exe
+            x86_64-w64-mingw32-g++-posix -Os -s -std=c++17 -static -Isrc tools/esp_flash_cli.cpp src/esp_flasher.cpp src/esp_sdr_client.cpp -o esp_flash_cli.exe -lsetupapi
             g++ -O2 -std=c++17 -Isrc tools/esp_flash_cli.cpp src/esp_flasher.cpp src/esp_sdr_client.cpp -o esp_flash_cli -lpthread
         - uses: actions/upload-artifact@v4
           with:

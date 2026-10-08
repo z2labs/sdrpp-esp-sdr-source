@@ -118,17 +118,77 @@ public:
     bool isEnabled() { return enabled; }
 
 private:
+    // Known USB-UART bridges: on an ESP32-S3 DevKit that is the UART port, the SDR needs the native USB
+    static bool isUartBridge(int vid) { return vid == 0x1A86 || vid == 0x10C4 || vid == 0x0403 || vid == 0x067B; }
+
     void refreshPorts() {
         ports = espsdr::SerialPort::list();
+        portVids.assign(ports.size(), 0);
         portsTxt.clear();
         portId = 0;
+        bool found = false;
+        int firstEsp = -1;
         for (size_t i = 0; i < ports.size(); i++) {
-            portsTxt += ports[i];
+            std::string label = ports[i];
+#ifndef __ANDROID__
+            int pid = 0;
+            portVids[i] = espsdr::SerialPort::usbId(ports[i], pid);
+            if (portVids[i] == 0x303A) {
+                label += " (ESP32-S3 USB)";
+                if (firstEsp < 0) { firstEsp = (int)i; }
+            }
+            else if (isUartBridge(portVids[i])) { label += " (USB-UART)"; }
+#endif
+            portsTxt += label;
             portsTxt += '\0';
-            if (ports[i] == port) portId = (int)i;
+            if (ports[i] == port) { portId = (int)i; found = true; }
         }
-        if (!ports.empty() && port.empty()) port = ports[0];
+        // Remembered port gone (or none yet): take the board's native USB port if there is one
+        if (!found && !ports.empty()) {
+            portId = firstEsp >= 0 ? firstEsp : 0;
+            if (firstEsp >= 0 || port.empty()) { port = ports[portId]; }
+        }
     }
+
+#ifndef __ANDROID__
+    // Desktop counterpart of the Android USB auto-start: when the board is plugged in while this
+    // source is selected and stopped, select its port and start (if "Start playback when SDR++
+    // starts" is on). UI thread, about once a second.
+    void pollHotplug() {
+        double now = ImGui::GetTime();
+        if (now < nextHotplug) { return; }
+        nextHotplug = now + 1.0;
+        if (running || flashing) { return; }   // keep the last list: no restart right after a manual stop
+        std::vector<std::string> now_ = espsdr::SerialPort::list();
+        std::vector<std::string> esp;
+        for (auto& p : now_) {
+            int pid = 0;
+            if (espsdr::SerialPort::usbId(p, pid) == 0x303A) { esp.push_back(p); }
+        }
+        if (now_ != ports) { refreshPorts(); }
+        std::string fresh;
+        for (auto& p : esp) {
+            if (std::find(lastEspPorts.begin(), lastEspPorts.end(), p) == lastEspPorts.end()) { fresh = p; }
+        }
+        bool first = !hotplugPrimed;
+        hotplugPrimed = true;
+        lastEspPorts = esp;
+        if (first || fresh.empty()) { return; }
+        flog::info("ESP-SDR: board plugged in on {}", fresh);
+        port = fresh;
+        refreshPorts();
+        config.acquire();
+        config.conf["port"] = port;
+        config.release(true);
+        core::configManager.acquire();
+        bool autoPlay = !core::configManager.conf.contains("playOnStart") || (bool)core::configManager.conf["playOnStart"];
+        core::configManager.release();
+        if (autoPlay) {
+            error.clear();
+            gui::mainWindow.startRequested = true;
+        }
+    }
+#endif
 
     espsdr::Settings settings() {
         espsdr::Settings s;
@@ -313,6 +373,11 @@ private:
         }
         SmGui::FillWidth();
         if (SmGui::Button(CONCAT("Refresh ports##_espsdr_refr_", _this->name))) { _this->refreshPorts(); }
+#ifndef __ANDROID__
+        if (_this->portId < (int)_this->portVids.size() && isUartBridge(_this->portVids[_this->portId])) {
+            SmGui::TextColored(ImVec4(1.0f, 0.6f, 0.2f, 1.0f), "This is the board's UART port: use its native USB port");
+        }
+#endif
 
         if (NMODES > 1) {
             SmGui::LeftLabel("Mode");
@@ -421,6 +486,9 @@ private:
         ESPSDRSourceModule* _this = (ESPSDRSourceModule*)ctx;
         _this->pollConnect();
         if (!_this->selected) { return; }
+#ifndef __ANDROID__
+        _this->pollHotplug();
+#endif
         if (_this->pendingTuneHz > 0) {
             double f = _this->pendingTuneHz;
             _this->pendingTuneHz = 0;
@@ -619,8 +687,12 @@ private:
     double freq = DEFAULT_HZ;
     std::string port;
     std::vector<std::string> ports;
+    std::vector<int> portVids;
     std::string portsTxt;
     int portId = 0;
+    double nextHotplug = 0;
+    bool hotplugPrimed = false;
+    std::vector<std::string> lastEspPorts;
     int rateId = 0;
     int modeId = 0;
     int binsId = 0;

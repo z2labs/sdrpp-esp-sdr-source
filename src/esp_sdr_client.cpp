@@ -10,6 +10,10 @@ static constexpr double kTwoPi = 6.283185307179586;
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#include <setupapi.h>
+#ifdef _MSC_VER
+#pragma comment(lib, "setupapi.lib")
+#endif
 #elif !defined(__ANDROID__)
 #include <fcntl.h>
 #include <glob.h>
@@ -97,6 +101,36 @@ std::vector<std::string> SerialPort::list() {
     }
     return r;
 }
+int SerialPort::usbId(const std::string& name, int& pid) {
+    // Ports class {4d36e978-e325-11ce-bfc1-08002be10318}: match PortName, read VID_/PID_ from the hardware ID
+    static const GUID portsClass = {0x4d36e978, 0xe325, 0x11ce, {0xbf, 0xc1, 0x08, 0x00, 0x2b, 0xe1, 0x03, 0x18}};
+    pid = 0;
+    HDEVINFO set = SetupDiGetClassDevsA(&portsClass, NULL, NULL, DIGCF_PRESENT);
+    if (set == INVALID_HANDLE_VALUE) return 0;
+    int vid = 0;
+    SP_DEVINFO_DATA d{};
+    d.cbSize = sizeof(d);
+    for (DWORD i = 0; SetupDiEnumDeviceInfo(set, i, &d); i++) {
+        HKEY k = SetupDiOpenDevRegKey(set, &d, DICS_FLAG_GLOBAL, 0, DIREG_DEV, KEY_READ);
+        if (k == INVALID_HANDLE_VALUE) continue;
+        char pn[64] = {0};
+        DWORD sz = sizeof(pn) - 1, type = 0;
+        bool match = RegQueryValueExA(k, "PortName", NULL, &type, (LPBYTE)pn, &sz) == ERROR_SUCCESS && _stricmp(pn, name.c_str()) == 0;
+        RegCloseKey(k);
+        if (!match) continue;
+        char hw[512] = {0};
+        if (SetupDiGetDeviceRegistryPropertyA(set, &d, SPDRP_HARDWAREID, NULL, (PBYTE)hw, sizeof(hw) - 1, NULL)) {
+            std::string h(hw);
+            for (auto& c : h) c = (char)toupper((unsigned char)c);
+            size_t v = h.find("VID_"), p = h.find("PID_");
+            if (v != std::string::npos) vid = (int)strtol(h.substr(v + 4, 4).c_str(), NULL, 16);
+            if (p != std::string::npos) pid = (int)strtol(h.substr(p + 4, 4).c_str(), NULL, 16);
+        }
+        break;
+    }
+    SetupDiDestroyDeviceInfoList(set);
+    return vid;
+}
 #elif defined(__ANDROID__)
 // see serial_android.cpp
 #else
@@ -145,6 +179,31 @@ bool SerialPort::setBaud(int baud) {
 #endif
     cfsetispeed(&t, sp); cfsetospeed(&t, sp);
     return tcsetattr(fd, TCSANOW, &t) == 0;
+}
+int SerialPort::usbId(const std::string& name, int& pid) {
+    pid = 0;
+#ifdef __linux__
+    // /sys/class/tty/ttyACM0/device -> USB interface; idVendor / idProduct sit one or two levels up
+    std::string base = name.substr(name.rfind('/') + 1);
+    char real[4096];
+    if (!realpath(("/sys/class/tty/" + base + "/device").c_str(), real)) return 0;
+    std::string dir = real;
+    for (int up = 0; up < 4 && dir.size() > 1; up++) {
+        FILE* fv = fopen((dir + "/idVendor").c_str(), "r");
+        if (fv) {
+            unsigned v = 0, p = 0;
+            int ok = fscanf(fv, "%x", &v);
+            fclose(fv);
+            FILE* fp = fopen((dir + "/idProduct").c_str(), "r");
+            if (fp) { if (fscanf(fp, "%x", &p) == 1) pid = (int)p; fclose(fp); }
+            return ok == 1 ? (int)v : 0;
+        }
+        dir = dir.substr(0, dir.rfind('/'));
+    }
+#else
+    (void)name;
+#endif
+    return 0;
 }
 std::vector<std::string> SerialPort::list() {
     std::vector<std::string> r;

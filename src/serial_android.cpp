@@ -170,6 +170,7 @@ bool SerialPort::setLines(bool dtr, bool rts) {
 bool SerialPort::setBaud(int) { return true; }   // USB Serial/JTAG: no baud rate
 
 std::vector<std::string> SerialPort::list() { return {"USB"}; }
+int SerialPort::usbId(const std::string&, int& pid) { pid = 0; return 0; }
 
 } // namespace espsdr
 #endif
