@@ -20,13 +20,13 @@ Ready-to-run **SDR++ ESP** packages with this module already included, from the 
 
 | Package | Platform |
 | --- | --- |
-| [`sdrpp-esp_windows_x64.zip`](https://github.com/z2labs/sdrpp-esp-sdr-source/releases/download/v0.2.0/sdrpp-esp_windows_x64.zip) | Windows 10/11 x64. Unzip and run `sdrpp.exe`. |
-| [`sdrpp-esp_macos_arm.zip`](https://github.com/z2labs/sdrpp-esp-sdr-source/releases/download/v0.2.0/sdrpp-esp_macos_arm.zip) | macOS, Apple Silicon (`SDR++.app`). |
-| [`sdrpp-esp_debian_bookworm_amd64.deb`](https://github.com/z2labs/sdrpp-esp-sdr-source/releases/download/v0.2.0/sdrpp-esp_debian_bookworm_amd64.deb) | Debian 12 x64. |
-| [`sdrpp-esp_ubuntu_noble_amd64.deb`](https://github.com/z2labs/sdrpp-esp-sdr-source/releases/download/v0.2.0/sdrpp-esp_ubuntu_noble_amd64.deb) | Ubuntu 24.04 x64. |
-| [`sdrpp-esp.apk`](https://github.com/z2labs/sdrpp-esp-sdr-source/releases/download/v0.2.0/sdrpp-esp.apk) | Android, USB OTG. Installs next to the official SDR++. |
+| [`sdrpp-esp_windows_x64.zip`](https://github.com/z2labs/sdrpp-esp-sdr-source/releases/latest/download/sdrpp-esp_windows_x64.zip) | Windows 10/11 x64. Unzip and run `sdrpp.exe`. |
+| [`sdrpp-esp_macos_arm.zip`](https://github.com/z2labs/sdrpp-esp-sdr-source/releases/latest/download/sdrpp-esp_macos_arm.zip) | macOS, Apple Silicon (`SDR++.app`). |
+| [`sdrpp-esp_debian_bookworm_amd64.deb`](https://github.com/z2labs/sdrpp-esp-sdr-source/releases/latest/download/sdrpp-esp_debian_bookworm_amd64.deb) | Debian 12 x64. |
+| [`sdrpp-esp_ubuntu_noble_amd64.deb`](https://github.com/z2labs/sdrpp-esp-sdr-source/releases/latest/download/sdrpp-esp_ubuntu_noble_amd64.deb) | Ubuntu 24.04 x64. |
+| [`sdrpp-esp.apk`](https://github.com/z2labs/sdrpp-esp-sdr-source/releases/latest/download/sdrpp-esp.apk) | Android, USB OTG. Installs next to the official SDR++. |
 
-The same files are published in the [z2labs/SDRPlusPlus esp-v0.2.0 release](https://github.com/z2labs/SDRPlusPlus/releases/tag/esp-v0.2.0), where they are built by CI. This is a fork build, not an official SDR++ release. The .deb packages use the official SDR++ package name, so installing one replaces an official SDR++ installation. To load the module into your own SDR++ build instead, see [Use](#use) and [Build](#build).
+The packages are built by CI in the [z2labs/SDRPlusPlus](https://github.com/z2labs/SDRPlusPlus) fork (branch `esp-sdr`). This is a fork build, not an official SDR++ release. The .deb packages use the official SDR++ package name, so installing one replaces an official SDR++ installation. To load the module into your own SDR++ build instead, see [Use](#use) and [Build](#build).
 
 ## Android (USB OTG)
 
@@ -36,7 +36,7 @@ The same files are published in the [z2labs/SDRPlusPlus esp-v0.2.0 release](http
 
 <img src="docs/img/android_otg.jpg" alt="SDR++ ESP on an Android phone with an ESP32-S3 over USB OTG, 80 MHz spectrum" width="640">
 
-The same module runs on Android in **SDR++ ESP**, a build of the [z2labs/SDRPlusPlus](https://github.com/z2labs/SDRPlusPlus) fork (branch `esp-sdr`): IQ with demodulation and the 16 / 40 / 80 MHz spectrum mode, over a USB OTG cable, no PC. Download the APK from the [latest release](https://github.com/z2labs/sdrpp-esp-sdr-source/releases/latest) ([`sdrpp-esp.apk`](https://github.com/z2labs/sdrpp-esp-sdr-source/releases/download/v0.2.0/sdrpp-esp.apk)). It installs next to the official SDR++.
+The same module runs on Android in **SDR++ ESP**, a build of the [z2labs/SDRPlusPlus](https://github.com/z2labs/SDRPlusPlus) fork (branch `esp-sdr`): IQ with demodulation and the 16 / 40 / 80 MHz spectrum mode, over a USB OTG cable, no PC. Download the APK from the [latest release](https://github.com/z2labs/sdrpp-esp-sdr-source/releases/latest) ([`sdrpp-esp.apk`](https://github.com/z2labs/sdrpp-esp-sdr-source/releases/latest/download/sdrpp-esp.apk)). It installs next to the official SDR++.
 
 Connect the board's **native USB** port (Espressif USB Serial/JTAG, 303A:1001; on devkits usually the one marked USB, not UART), start the app, allow USB access, then choose source **ESP-SDR (ESP32-S3)** and port **USB**.
 
