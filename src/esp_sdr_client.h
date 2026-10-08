@@ -81,6 +81,8 @@ public:
     uint64_t update(const Settings& s);   // applied by the worker thread (stream restart); returns a sequence number
     bool applied(uint64_t seq) const { return appliedSeq >= seq; }   // stream restarted with those settings
     bool running() const { return run; }
+    // A start() running on another thread gives up soon (true), or may run normally again (false)
+    void cancelStart(bool c) { cancel = c; }
     Stats stats;
     std::string lastTune() { std::lock_guard<std::mutex> l(mtx); return tuneInfo; }
     // Firmware identity from VERSION? ("2026-10-07 8fdf468"), or a note for firmware
@@ -112,6 +114,7 @@ private:
     int specFs = 0, specBins = 0;
     std::thread thr;
     std::atomic<bool> run{false};
+    std::atomic<bool> cancel{false};
     std::mutex mtx;
     Settings want, cur;
     bool dirty = true, streaming = false, fresh = true;

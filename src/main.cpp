@@ -107,6 +107,7 @@ public:
         gui::waterfall.onFFTRedraw.unbindHandler(&fftRedrawHandler);
         if (flashThread.joinable()) { flashThread.join(); }
         stop(this);
+        joinConnect();
         sigpath::sourceManager.unregisterSource("ESP-SDR (ESP32-S3)");
     }
 
@@ -203,26 +204,61 @@ private:
             openName = "fd:" + std::to_string(fd);
         }
 #endif
-        bool ok = _this->client.start(openName, _this->settings(), [_this](const float* iq, int n) {
-            memcpy(_this->stream.writeBuf, iq, sizeof(float) * 2 * n);
-            _this->stream.swap(n);
-        }, err, scb);
-        if (!ok) {
-#ifdef ESP_SDR_HAVE_EXTERNAL_FFT
-            sigpath::iqFrontEnd.setExternalFFTInput(false);
-#endif
-            _this->error = err;
-            flog::error("ESP-SDR: {}", err);
+        // Connecting takes up to a few seconds (stream from an earlier session draining, CAPS,
+        // VERSION?): off the UI thread. The module counts as running meanwhile.
+        _this->joinConnect();
+        _this->client.cancelStart(false);
+        _this->connectState = CONNECTING;
+        _this->running = true;
+        flog::info("ESPSDRSourceModule '{0}': connecting on {1}", _this->name, openName);
+        _this->connectThread = std::thread([_this, openName, scb] {
+            std::string err;
+            bool ok = _this->client.start(openName, _this->settings(), [_this](const float* iq, int n) {
+                memcpy(_this->stream.writeBuf, iq, sizeof(float) * 2 * n);
+                _this->stream.swap(n);
+            }, err, scb);
+            if (ok) {
+                _this->client.update(_this->settings());   // tuned while connecting
+                flog::info("ESPSDRSourceModule '{0}': Start on {1}", _this->name, openName);
+            }
+            else {
+                std::lock_guard<std::mutex> l(_this->connectMtx);
+                _this->connectError = err;
+            }
+            _this->connectState = ok ? CONNECTED : FAILED;
+        });
+    }
+
+    // UI thread, every frame: take over the result of the connect thread
+    void pollConnect() {
+        if (connectState != FAILED) {
+            if (connectState == CONNECTED) { error.clear(); connectState = IDLE; }
             return;
         }
-        _this->error.clear();
-        _this->running = true;
-        flog::info("ESPSDRSourceModule '{0}': Start on {1}", _this->name, _this->port);
+        connectState = IDLE;
+        std::string err;
+        {
+            std::lock_guard<std::mutex> l(connectMtx);
+            err = connectError;
+        }
+        if (err == "connect cancelled") { return; }
+        error = err;
+        flog::error("ESP-SDR: {}", err);
+        gui::mainWindow.stopRequested = true;   // play button back to stopped
+    }
+
+    void joinConnect() {
+        if (connectThread.joinable()) {
+            client.cancelStart(true);
+            connectThread.join();
+            client.cancelStart(false);
+        }
     }
 
     static void stop(void* ctx) {
         ESPSDRSourceModule* _this = (ESPSDRSourceModule*)ctx;
         if (!_this->running) { return; }
+        _this->joinConnect();
         _this->stream.stopWriter();
         _this->client.stop();
         _this->stream.clearWriteStop();
@@ -259,6 +295,7 @@ private:
 
     static void menuHandler(void* ctx) {
         ESPSDRSourceModule* _this = (ESPSDRSourceModule*)ctx;
+        _this->pollConnect();
 
         // Nothing greys out while running: a change here restarts the stream
         bool restart = false;
@@ -341,7 +378,10 @@ private:
             SmGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), _this->error.c_str());
         }
         else if (_this->running) {
-            if (!_this->client.running()) {
+            if (_this->connectState == CONNECTING) {
+                SmGui::Text("Connecting...");
+            }
+            else if (!_this->client.running()) {
                 SmGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "Device lost - press stop");
             }
             else {
@@ -378,6 +418,7 @@ private:
     // receiver's measured range, marks the 2.4 GHz ISM band and shows the out-of-range notice.
     static void fftRedraw(ImGui::WaterFall::FFTRedrawArgs args, void* ctx) {
         ESPSDRSourceModule* _this = (ESPSDRSourceModule*)ctx;
+        _this->pollConnect();
         if (!_this->selected) { return; }
         if (_this->pendingTuneHz > 0) {
             double f = _this->pendingTuneHz;
@@ -437,6 +478,11 @@ private:
     dsp::stream<dsp::complex_t> stream;
     SourceManager::SourceHandler handler;
     espsdr::Client client;
+    enum { IDLE, CONNECTING, CONNECTED, FAILED };
+    std::atomic<int> connectState{IDLE};
+    std::thread connectThread;
+    std::mutex connectMtx;
+    std::string connectError;
 
     // ---- firmware update (ROM bootloader over the same USB port) ----
     espsdr::FirmwareBundle bundle;

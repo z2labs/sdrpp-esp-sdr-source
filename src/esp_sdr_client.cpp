@@ -181,12 +181,12 @@ bool Client::start(const std::string& name, const Settings& s, SampleCallback ca
     // Make sure no stream is still running from an earlier session (an 80 MHz SPEC run keeps
     // sending for a while after the stop byte): stop, then wait for the line to go quiet
     bool capsOk = false;
-    for (int attempt = 0; attempt < 3 && !capsOk; attempt++) {
+    for (int attempt = 0; attempt < 3 && !capsOk && !cancel; attempt++) {
         port.write("\n");
         uint8_t junk[16384];
         auto quietSince = std::chrono::steady_clock::now();
         auto giveUp = quietSince + std::chrono::seconds(3);
-        while (std::chrono::steady_clock::now() < giveUp) {
+        while (std::chrono::steady_clock::now() < giveUp && !cancel) {
             int n = port.read(junk, sizeof(junk));
             if (n < 0) break;
             if (n > 0) quietSince = std::chrono::steady_clock::now();
@@ -195,6 +195,7 @@ bool Client::start(const std::string& name, const Settings& s, SampleCallback ca
         port.flushInput();
         capsOk = command("CAPS", "CAPS", 1500);
     }
+    if (cancel) { error = "connect cancelled"; port.close(); return false; }
     if (!capsOk) { error = "no ESP-SDR firmware answering on " + name; port.close(); return false; }
     std::string caps = reply + " ";
     bool hasSpec = caps.find(" SPEC ") != std::string::npos || caps.find(" SPEC") != std::string::npos;
@@ -258,7 +259,7 @@ bool Client::command(const std::string& c, const char* expect, int timeoutMs) {
     std::string line;
     auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
     uint8_t b[256];
-    while (std::chrono::steady_clock::now() < end) {
+    while (std::chrono::steady_clock::now() < end && !cancel) {
         int n = port.read(b, sizeof(b));
         for (int i = 0; i < n; i++) {
             if (b[i] == '\n') {
