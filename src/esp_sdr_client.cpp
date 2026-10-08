@@ -400,7 +400,12 @@ void Client::startStream(const Settings& s) {
         // On-chip spectrum: LO at the centre, analog filter open at 40/80 MS/s (its default
         // 20 MHz would only show filtered noise at the edges), ~50 spectra/s to the host
         int code = 0, stride = 1, upf = 1;
-        if (!specProfile(s.specRate, s.bins, code, stride, upf)) { code = 6; stride = 2; upf = 1; }
+        int nb = s.bins;
+        if (nb > 2048 && specInfo.find("," + std::to_string(nb) + ",") == std::string::npos) {
+            if (log) log("firmware has no " + std::to_string(nb) + "-bin spectrum (needs a board with PSRAM and newer firmware), using 2048");
+            nb = 2048;
+        }
+        if (!specProfile(s.specRate, nb, code, stride, upf)) { code = 6; stride = 2; upf = 1; }
         int unitUs = (int)(12288ll * 1000000 / s.specRate);           // one ring unit
         upf = std::max(upf, std::min(1000, 20000 / std::max(1, unitUs)));
         command("FREQ " + std::to_string(fk / 1000), "OK", 1500);
@@ -411,13 +416,13 @@ void Client::startStream(const Settings& s) {
         // centre 8-20 dB high because the LO leakage changes from FFT to FFT); old firmware: ERR, ignored
         command(s.specDcFix ? "DC 0" : "DC 1", "", 800);
         port.write("SPEC 0 " + std::to_string(stride) + " " + std::to_string(upf) + " " + (s.maxHold ? "1" : "0") + " " +
-                   std::to_string(code) + " " + std::to_string(s.bins) + "\n");
+                   std::to_string(code) + " " + std::to_string(nb) + "\n");
         {
             std::lock_guard<std::mutex> l(mtx);
-            tuneInfo = "Spectrum " + std::to_string(s.specRate / 1000000) + " MHz, " + std::to_string(s.bins) + " bins, " +
+            tuneInfo = "Spectrum " + std::to_string(s.specRate / 1000000) + " MHz, " + std::to_string(nb) + " bins, " +
                        (s.maxHold ? "max hold" : "mean");
         }
-        specFs = s.specRate; specBins = s.bins;
+        specFs = s.specRate; specBins = nb;
         buf.clear();
         textTail.clear();
         streaming = true; fresh = true; haveNext = false;

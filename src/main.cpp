@@ -60,8 +60,9 @@ static const int MODES[] = {0};
 static const char* MODES_TXT = "IQ (demodulation)\0";
 static const int NMODES = 1;
 #endif
-static const int BINS[] = {256, 1024, 2048};
-static const char* BINS_TXT = "256\0" "1024\0" "2048\0";
+// 4096 needs firmware with a 4096 profile (boards with PSRAM); otherwise 2048 is used
+static const int BINS[] = {256, 1024, 2048, 4096};
+static const char* BINS_TXT = "256\0" "1024\0" "2048\0" "4096 (PSRAM boards)\0";
 
 class ESPSDRSourceModule : public ModuleManager::Instance {
 public:
@@ -73,7 +74,7 @@ public:
         if (config.conf.contains("gain")) gain = std::clamp<int>(config.conf["gain"], 0, 82);
         if (config.conf.contains("ppm")) ppm = config.conf["ppm"];
         if (config.conf.contains("modeId")) modeId = std::clamp<int>(config.conf["modeId"], 0, NMODES - 1);
-        if (config.conf.contains("binsId")) binsId = std::clamp<int>(config.conf["binsId"], 0, 2);
+        if (config.conf.contains("binsId")) binsId = std::clamp<int>(config.conf["binsId"], 0, 3);
         if (config.conf.contains("maxHold")) maxHold = config.conf["maxHold"];
         config.release();
         refreshPorts();
