@@ -555,7 +555,7 @@ private:
 #endif
             if (err.empty() && sp.open(portName, err)) {
                 espsdr::Flasher f;
-                flog::info("ESP-SDR flash: start on {} ({} images)", portName, bundle.images.size());
+                flog::info("ESP-SDR flash: start on {} ({} images)", portName, (int)bundle.images.size());
                 ok = f.flash(sp, true, bundle.images, reopen, [this](const std::string& s, float frac) {
                     std::lock_guard<std::mutex> l(flashMtx);
                     if (s != flashStage) { flog::info("ESP-SDR flash: {} ({:.0f} %)", s, frac * 100.0f); }
