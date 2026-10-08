@@ -461,7 +461,7 @@ void Client::worker() {
     while (run) {
         bool apply = false; Settings s; uint64_t seq = 0;
         auto now = std::chrono::steady_clock::now();
-        if (!streaming || now - lastApply >= (hasIqTune ? std::chrono::milliseconds(15) : MIN_RETUNE)) {
+        if (!streaming || now - lastApply >= (hasIqTune ? std::chrono::milliseconds(100) : MIN_RETUNE)) {
             std::lock_guard<std::mutex> l(mtx);
             if (dirty) { s = want; seq = wantSeq; dirty = false; apply = true; }
         }
