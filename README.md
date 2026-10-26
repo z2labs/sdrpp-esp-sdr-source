@@ -26,7 +26,7 @@ Ready-to-run **Z2 SDR** packages (SDR++ based) with this module already included
 | [`z2sdr_ubuntu_noble_amd64.deb`](https://github.com/z2labs/sdrpp-esp-sdr-source/releases/latest/download/z2sdr_ubuntu_noble_amd64.deb) | Ubuntu 24.04 x64. |
 | [`z2sdr.apk`](https://github.com/z2labs/sdrpp-esp-sdr-source/releases/latest/download/z2sdr.apk) | Android, USB OTG. Installs next to the official SDR++. |
 
-The packages are built by CI in the [z2labs/SDRPlusPlus](https://github.com/z2labs/SDRPlusPlus) fork (branch `esp-sdr`). This is a fork build, not an official SDR++ release. The .deb packages use the official SDR++ package name, so installing one replaces an official SDR++ installation. To load the module into your own SDR++ build instead, see [Use](#use) and [Build](#build).
+The packages are built by CI in [Z2-SDR](https://github.com/z2labs/Z2-SDR) (branch `esp-sdr`), an application based on SDR++. This is not an official SDR++ release. The .deb packages use the official SDR++ package name, so installing one replaces an official SDR++ installation. To load the module into your own SDR++ build instead, see [Use](#use) and [Build](#build).
 
 ## Android (USB OTG)
 
@@ -36,7 +36,7 @@ The packages are built by CI in the [z2labs/SDRPlusPlus](https://github.com/z2la
 
 <img src="docs/img/android_otg.jpg" alt="SDR++ ESP on an Android phone with an ESP32-S3 over USB OTG, 80 MHz spectrum" width="640">
 
-The same module runs on Android in **SDR++ ESP**, a build of the [z2labs/SDRPlusPlus](https://github.com/z2labs/SDRPlusPlus) fork (branch `esp-sdr`): IQ with demodulation and the 16 / 40 / 80 MHz spectrum mode, over a USB OTG cable, no PC. Download the APK from the [latest release](https://github.com/z2labs/sdrpp-esp-sdr-source/releases/latest) ([`z2sdr.apk`](https://github.com/z2labs/sdrpp-esp-sdr-source/releases/latest/download/z2sdr.apk)). It installs next to the official SDR++.
+The same module runs on Android in **Z2 SDR** (formerly SDR++ ESP), a build of [Z2-SDR](https://github.com/z2labs/Z2-SDR) (branch `esp-sdr`): IQ with demodulation and the 16 / 40 / 80 MHz spectrum mode, over a USB OTG cable, no PC. Download the APK from the [latest release](https://github.com/z2labs/sdrpp-esp-sdr-source/releases/latest) ([`z2sdr.apk`](https://github.com/z2labs/sdrpp-esp-sdr-source/releases/latest/download/z2sdr.apk)). It installs next to the official SDR++.
 
 Connect the board's **native USB** port (Espressif USB Serial/JTAG, 303A:1001; on devkits usually the one marked USB, not UART), start the app, allow USB access, then choose source **ESP-SDR (ESP32-S3)** and port **USB**.
 
